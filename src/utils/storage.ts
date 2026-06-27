@@ -102,10 +102,27 @@ export const storageApi = {
 
           if (isVideo) {
             const videoEl = document.createElement('video');
-            videoEl.preload = 'metadata';
+            videoEl.preload = 'auto';
+            videoEl.muted = true;
+            videoEl.playsInline = true;
+            
+            let resolved = false;
+            const safeResolve = () => {
+              if (!resolved) {
+                resolved = true;
+              }
+            };
             
             await new Promise<void>((resolveVideo) => {
+              const finish = () => {
+                safeResolve();
+                resolveVideo();
+              };
+              
+              const timeout = setTimeout(finish, 8000);
+              
               videoEl.onloadedmetadata = () => {
+                if (resolved) return;
                 video.duration = Math.round(videoEl.duration);
                 
                 const canvas = document.createElement('canvas');
@@ -113,33 +130,49 @@ export const storageApi = {
                 canvas.height = 180;
                 const ctx = canvas.getContext('2d');
                 
-                videoEl.currentTime = Math.min(1, videoEl.duration / 2);
-                videoEl.onseeked = () => {
-                  try {
-                    if (ctx) {
-                      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-                      canvas.toBlob((blob) => {
-                        thumbnailBlob = blob || undefined;
-                        resolveVideo();
-                      }, 'image/jpeg', 0.7);
-                    } else {
-                      resolveVideo();
+                try {
+                  const seekTime = Math.min(1, videoEl.duration / 2);
+                  videoEl.currentTime = seekTime;
+                  
+                  videoEl.onseeked = () => {
+                    if (resolved) return;
+                    try {
+                      if (ctx) {
+                        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+                        canvas.toBlob((blob) => {
+                          thumbnailBlob = blob || undefined;
+                          clearTimeout(timeout);
+                          finish();
+                        }, 'image/jpeg', 0.7);
+                      } else {
+                        clearTimeout(timeout);
+                        finish();
+                      }
+                    } catch {
+                      clearTimeout(timeout);
+                      finish();
                     }
-                  } catch {
-                    resolveVideo();
-                  }
-                };
-                
-                videoEl.onerror = () => resolveVideo();
-                
-                const objectUrl = URL.createObjectURL(file);
-                videoEl.src = objectUrl;
+                  };
+                  
+                  videoEl.onerror = () => {
+                    clearTimeout(timeout);
+                    finish();
+                  };
+                  
+                } catch {
+                  clearTimeout(timeout);
+                  finish();
+                }
               };
               
-              videoEl.onerror = () => resolveVideo();
+              videoEl.onerror = () => {
+                clearTimeout(timeout);
+                finish();
+              };
               
               const objectUrl = URL.createObjectURL(file);
               videoEl.src = objectUrl;
+              videoEl.load();
             });
           }
 
