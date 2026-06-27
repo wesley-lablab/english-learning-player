@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Mic, MicOff, Play, Pause, RotateCcw, 
   CheckCircle, XCircle, Headphones, ChevronRight, ChevronLeft,
-  PlayCircle, Volume2
+  PlayCircle, Volume2, BarChart3
 } from 'lucide-react';
 import type { Video, Sentence } from '../types';
 import { storageApi } from '../utils/storage';
@@ -12,6 +12,7 @@ import {
   formatTime 
 } from '../utils/pronunciation';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
+import { extractAudioWaveform, drawWaveform, compareAudioRhythm } from '../utils/audioWaveform';
 
 export default function PracticeSession() {
   const { id } = useParams<{ id: string }>();
@@ -20,6 +21,8 @@ export default function PracticeSession() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const originalWaveformCanvasRef = useRef<HTMLCanvasElement>(null);
+  const recordingWaveformCanvasRef = useRef<HTMLCanvasElement>(null);
   
   const [video, setVideo] = useState<Video | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,9 +31,20 @@ export default function PracticeSession() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recognizedText, setRecognizedText] = useState('');
-  const [result, setResult] = useState<{ accuracy: number; feedback: string; score: string } | null>(null);
+  const [result, setResult] = useState<{ 
+    accuracy: number; 
+    feedback: string; 
+    score: string;
+    rhythmScore?: number;
+    volumeScore?: number;
+    overallScore?: number;
+  } | null>(null);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [isPlayingRecording, setIsPlayingRecording] = useState(false);
+  const [originalPeaks, setOriginalPeaks] = useState<number[]>([]);
+  const [recordingPeaks, setRecordingPeaks] = useState<number[]>([]);
+  const [extractingOriginal, setExtractingOriginal] = useState(false);
 
   const { startListening, stopListening, transcript, resetTranscript, isSupported } = useSpeechRecognition({
     language: 'en-US',
@@ -42,7 +56,6 @@ export default function PracticeSession() {
   });
 
   const currentSentence = sentences[currentIndex];
-  const duration = video?.duration || 0;
 
   useEffect(() => {
     loadVideo();
@@ -70,6 +83,98 @@ export default function PracticeSession() {
       console.error(e);
     }
     setLoading(false);
+  };
+
+  useEffect(() => {
+    if (currentSentence && videoRef.current && video) {
+      extractOriginalWaveform();
+    }
+  }, [currentIndex, currentSentence]);
+
+  const extractOriginalWaveform = async () => {
+    if (!videoRef.current || !currentSentence || !originalWaveformCanvasRef.current) return;
+    
+    setExtractingOriginal(true);
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      const canvas = originalWaveformCanvasRef.current;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      
+      const source = audioContext.createMediaElementSource(videoRef.current);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      
+      source.connect(analyser);
+      analyser.connect(audioContext.destination);
+      
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const samples = 80;
+      const peaks: number[] = new Array(samples).fill(0);
+      
+      const sentenceDuration = currentSentence.endTime - currentSentence.startTime;
+      const sampleInterval = sentenceDuration / samples;
+      
+      videoRef.current.currentTime = currentSentence.startTime;
+      await new Promise<void>((resolve) => {
+        const onSeeked = () => {
+          videoRef.current?.removeEventListener('seeked', onSeeked);
+          resolve();
+        };
+        videoRef.current?.addEventListener('seeked', onSeeked);
+      });
+      
+      let currentSample = 0;
+      
+      await new Promise<void>((resolve) => {
+        const collectData = () => {
+          if (!videoRef.current) {
+            resolve();
+            return;
+          }
+          
+          if (videoRef.current.currentTime >= currentSentence.endTime || currentSample >= samples) {
+            videoRef.current.pause();
+            resolve();
+            return;
+          }
+          
+          const elapsed = videoRef.current.currentTime - currentSentence.startTime;
+          const targetSample = Math.floor(elapsed / sampleInterval);
+          
+          while (currentSample <= targetSample && currentSample < samples) {
+            analyser.getByteTimeDomainData(dataArray);
+            
+            let max = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+              const v = Math.abs(dataArray[i] - 128) / 128;
+              if (v > max) max = v;
+            }
+            
+            peaks[currentSample] = max;
+            currentSample++;
+          }
+          
+          requestAnimationFrame(collectData);
+        };
+        
+        videoRef.current.play();
+        collectData();
+      });
+      
+      setOriginalPeaks(peaks);
+      drawWaveform(canvas, peaks, '#f97316', 'rgba(249, 115, 22, 0.1)');
+      
+      audioContext.close();
+      
+    } catch (e) {
+      console.warn('提取原音波形失败', e);
+    }
+    setExtractingOriginal(false);
   };
 
   const handleTimeUpdate = useCallback(() => {
@@ -105,11 +210,26 @@ export default function PracticeSession() {
         audioChunksRef.current.push(e.data);
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        setRecordedBlob(audioBlob);
         const url = URL.createObjectURL(audioBlob);
         setRecordedAudioUrl(url);
         stream.getTracks().forEach(track => track.stop());
+        
+        try {
+          const waveform = await extractAudioWaveform(audioBlob, 80);
+          setRecordingPeaks(waveform.peaks);
+          
+          if (recordingWaveformCanvasRef.current) {
+            const canvas = recordingWaveformCanvasRef.current;
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            drawWaveform(canvas, waveform.peaks, '#10b981', 'rgba(16, 185, 129, 0.1)');
+          }
+        } catch (e) {
+          console.warn('提取录音波形失败', e);
+        }
       };
 
       mediaRecorder.start();
@@ -118,6 +238,8 @@ export default function PracticeSession() {
       setRecognizedText('');
       setResult(null);
       resetTranscript();
+      setRecordingPeaks([]);
+      setRecordedBlob(null);
     } catch (e) {
       console.error('录音失败', e);
       alert('无法访问麦克风，请检查权限设置');
@@ -154,7 +276,18 @@ export default function PracticeSession() {
     const score = getScore(accuracy);
     const feedback = generateFeedback(accuracy, currentSentence.text, recognizedText);
     
-    setResult({ accuracy, feedback, score });
+    let rhythmScore: number | undefined;
+    let volumeScore: number | undefined;
+    let overallScore: number | undefined;
+    
+    if (originalPeaks.length > 0 && recordingPeaks.length > 0) {
+      const rhythm = compareAudioRhythm(originalPeaks, recordingPeaks);
+      rhythmScore = rhythm.rhythmScore;
+      volumeScore = rhythm.volumeScore;
+      overallScore = Math.round(accuracy * 0.7 + rhythm.overallScore * 0.3);
+    }
+    
+    setResult({ accuracy, feedback, score, rhythmScore, volumeScore, overallScore });
   };
 
   const handleNext = () => {
@@ -177,7 +310,9 @@ export default function PracticeSession() {
     setRecognizedText('');
     setResult(null);
     setRecordedAudioUrl(null);
+    setRecordedBlob(null);
     setIsPlayingRecording(false);
+    setRecordingPeaks([]);
     resetTranscript();
     if (videoRef.current) {
       videoRef.current.pause();
@@ -231,7 +366,6 @@ export default function PracticeSession() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50">
-      {/* 隐藏的视频 */}
       <video
         ref={videoRef}
         src={video.fileDataUrl}
@@ -240,6 +374,7 @@ export default function PracticeSession() {
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onEnded={() => setIsPlaying(false)}
+        crossOrigin="anonymous"
       />
 
       <header className="bg-gradient-to-r from-orange-400 via-orange-500 to-yellow-400 text-white py-4 px-4 shadow-lg">
@@ -262,7 +397,6 @@ export default function PracticeSession() {
       <main className="max-w-3xl mx-auto px-4 py-6">
         {currentSentence && (
           <>
-            {/* 进度条 */}
             <div className="mb-6">
               <div className="flex gap-1.5">
                 {sentences.map((_, i) => (
@@ -280,13 +414,12 @@ export default function PracticeSession() {
               </div>
             </div>
 
-            {/* 句子卡片 */}
             <div className="bg-white rounded-3xl shadow-xl p-6 mb-6">
-              <div className="text-center mb-6">
+              <div className="text-center mb-4">
                 <div className="inline-block px-4 py-1 bg-orange-100 text-orange-600 rounded-full text-sm font-bold mb-4">
                   句子 {currentIndex + 1} / {sentences.length}
                 </div>
-                <p className="text-3xl font-bold text-gray-800 leading-relaxed">
+                <p className="text-2xl font-bold text-gray-800 leading-relaxed">
                   {currentSentence.text}
                 </p>
                 <div className="flex items-center justify-center gap-2 mt-3 text-gray-500">
@@ -297,40 +430,52 @@ export default function PracticeSession() {
                 </div>
               </div>
 
-              {/* 播放控制 */}
-              <div className="flex items-center justify-center gap-4 mb-6">
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <BarChart3 className="w-4 h-4 text-orange-500" />
+                  <span className="text-sm font-medium text-orange-600">原音波形</span>
+                  {extractingOriginal && (
+                    <span className="text-xs text-orange-400 animate-pulse">分析中...</span>
+                  )}
+                </div>
+                <canvas
+                  ref={originalWaveformCanvasRef}
+                  className="w-full h-16 bg-orange-50 rounded-xl"
+                />
+              </div>
+
+              <div className="flex items-center justify-center gap-4 mb-4">
                 <button
                   onClick={handlePrevious}
                   disabled={currentIndex === 0}
-                  className="w-14 h-14 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-40 transition-colors"
+                  className="w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-40 transition-colors"
                 >
-                  <ChevronLeft className="w-7 h-7 text-gray-600" />
+                  <ChevronLeft className="w-6 h-6 text-gray-600" />
                 </button>
                 <button
                   onClick={playSentence}
-                  className="w-20 h-20 bg-gradient-to-r from-orange-400 to-yellow-500 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-transform active:scale-95"
+                  className="w-16 h-16 bg-gradient-to-r from-orange-400 to-yellow-500 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-transform active:scale-95"
                 >
                   {isPlaying ? (
-                    <Pause className="w-10 h-10" />
+                    <Pause className="w-8 h-8" />
                   ) : (
-                    <Play className="w-10 h-10 ml-1" />
+                    <Play className="w-8 h-8 ml-1" />
                   )}
                 </button>
                 <button
                   onClick={handleNext}
                   disabled={currentIndex === sentences.length - 1}
-                  className="w-14 h-14 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-40 transition-colors"
+                  className="w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-40 transition-colors"
                 >
-                  <ChevronRight className="w-7 h-7 text-gray-600" />
+                  <ChevronRight className="w-6 h-6 text-gray-600" />
                 </button>
               </div>
 
               <div className="text-center text-sm text-gray-500">
-                👆 点击播放按钮听原句
+                👆 点击播放按钮听原句，观察波形节奏
               </div>
             </div>
 
-            {/* 跟读录音卡片 */}
             <div className="bg-white rounded-3xl shadow-xl p-6 mb-6">
               <h3 className="text-xl font-bold text-gray-700 mb-4 flex items-center justify-center gap-2">
                 <Headphones className="w-6 h-6 text-emerald-500" />
@@ -343,20 +488,19 @@ export default function PracticeSession() {
                 </div>
               ) : (
                 <>
-                  {/* 录音按钮 */}
                   <div className="flex flex-col items-center gap-3 mb-4">
                     <button
                       onClick={isRecording ? stopRecording : startRecording}
-                      className={`w-28 h-28 rounded-full flex items-center justify-center shadow-xl transition-all ${
+                      className={`w-24 h-24 rounded-full flex items-center justify-center shadow-xl transition-all ${
                         isRecording
                           ? 'bg-red-500 animate-pulse scale-105'
                           : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:scale-105 active:scale-95'
                       }`}
                     >
                       {isRecording ? (
-                        <MicOff className="w-14 h-14 text-white" />
+                        <MicOff className="w-12 h-12 text-white" />
                       ) : (
-                        <Mic className="w-14 h-14 text-white" />
+                        <Mic className="w-12 h-12 text-white" />
                       )}
                     </button>
                     <p className={`font-bold text-lg ${isRecording ? 'text-red-500' : 'text-gray-600'}`}>
@@ -364,7 +508,19 @@ export default function PracticeSession() {
                     </p>
                   </div>
 
-                  {/* 录音回放 */}
+                  {recordingPeaks.length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <BarChart3 className="w-4 h-4 text-emerald-500" />
+                        <span className="text-sm font-medium text-emerald-600">你的录音波形</span>
+                      </div>
+                      <canvas
+                        ref={recordingWaveformCanvasRef}
+                        className="w-full h-16 bg-emerald-50 rounded-xl"
+                      />
+                    </div>
+                  )}
+
                   {recordedAudioUrl && !isRecording && (
                     <div className="mb-4 bg-purple-50 rounded-2xl p-4">
                       <div className="flex items-center justify-between">
@@ -387,7 +543,6 @@ export default function PracticeSession() {
                     </div>
                   )}
 
-                  {/* 识别结果 */}
                   {recognizedText && (
                     <div className="mb-4 bg-gray-50 rounded-2xl p-4">
                       <p className="text-xs text-gray-500 mb-2">📝 系统识别你读的是：</p>
@@ -395,7 +550,6 @@ export default function PracticeSession() {
                     </div>
                   )}
 
-                  {/* 对比结果 */}
                   {result && (
                     <div className={`rounded-2xl p-5 ${
                       result.score === 'excellent' ? 'bg-green-100' :
@@ -415,10 +569,40 @@ export default function PracticeSession() {
                              result.score === 'fair' ? '还不错 😊' : '继续加油 💪'}
                           </span>
                         </div>
-                        <div className="text-4xl font-bold text-emerald-600">
-                          {result.accuracy}%
+                        <div className="text-right">
+                          <div className="text-4xl font-bold text-emerald-600">
+                            {result.overallScore || result.accuracy}%
+                          </div>
+                          <div className="text-xs text-gray-500">综合得分</div>
                         </div>
                       </div>
+
+                      {(result.rhythmScore !== undefined || result.volumeScore !== undefined) && (
+                        <div className="grid grid-cols-2 gap-3 mb-4">
+                          <div className="bg-white/60 rounded-xl p-3">
+                            <div className="text-xs text-gray-500 mb-1">节奏相似度</div>
+                            <div className="text-xl font-bold text-orange-500">{result.rhythmScore}%</div>
+                          </div>
+                          <div className="bg-white/60 rounded-xl p-3">
+                            <div className="text-xs text-gray-500 mb-1">音量匹配</div>
+                            <div className="text-xl font-bold text-purple-500">{result.volumeScore}%</div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="bg-white/40 rounded-xl p-3 mb-4">
+                        <div className="text-xs text-gray-500 mb-1">发音准确度</div>
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-emerald-500 rounded-full transition-all"
+                              style={{ width: `${result.accuracy}%` }}
+                            />
+                          </div>
+                          <span className="font-bold text-emerald-600">{result.accuracy}%</span>
+                        </div>
+                      </div>
+
                       <p className="text-lg text-gray-700 mb-4">{result.feedback}</p>
                       <div className="flex gap-3">
                         <button
@@ -441,7 +625,6 @@ export default function PracticeSession() {
                     </div>
                   )}
 
-                  {/* 对比按钮 */}
                   {recognizedText && !result && (
                     <div className="flex justify-center">
                       <button
@@ -456,10 +639,9 @@ export default function PracticeSession() {
               )}
             </div>
 
-            {/* 小提示 */}
             <div className="bg-white/60 rounded-2xl p-4 text-center">
               <p className="text-sm text-gray-500">
-                💡 小提示：先听 2-3 遍原句，熟悉了再跟读效果更好哦！
+                💡 小提示：注意观察波形的起伏，尽量跟原音的节奏一样哦！
               </p>
             </div>
           </>

@@ -3,11 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Play, Pause, Plus, Trash2, Edit3, Save,
   Flag, PlayCircle, HelpCircle, GripVertical,
-  MoveLeft, MoveRight, Scissors, ZoomIn
+  MoveLeft, MoveRight, Scissors, ZoomIn, Mic, MicOff
 } from 'lucide-react';
 import type { Video, Sentence } from '../types';
 import { storageApi } from '../utils/storage';
 import { formatTime, autoSplitSentences } from '../utils/pronunciation';
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 
 type DragType = 'start' | 'end' | 'move' | null;
 
@@ -30,6 +31,19 @@ export default function SentenceEditor() {
   const [dragStartX, setDragStartX] = useState(0);
   const [dragStartTime, setDragStartTime] = useState(0);
   const [dragEndTime, setDragEndTime] = useState(0);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+
+  const { startListening, stopListening, transcript, resetTranscript, isSupported } = useSpeechRecognition({
+    language: 'en-US',
+    onResult: (res) => {
+      if (res.isFinal && editingIndex !== null) {
+        setEditText(prev => {
+          const text = res.transcript.trim();
+          return prev ? prev + ' ' + text : text;
+        });
+      }
+    },
+  });
 
   const duration = video?.duration || 0;
 
@@ -692,29 +706,76 @@ export default function SentenceEditor() {
                 {/* 文本编辑 */}
                 {editingIndex === currentIndex ? (
                   <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-emerald-700">句子文本</span>
+                      {isSupported && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isTranscribing) {
+                              stopListening();
+                              setIsTranscribing(false);
+                            } else {
+                              startListening();
+                              setIsTranscribing(true);
+                            }
+                          }}
+                          className={`flex items-center gap-1 text-sm px-3 py-1 rounded-lg ${
+                            isTranscribing 
+                              ? 'bg-red-100 text-red-600 animate-pulse' 
+                              : 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'
+                          }`}
+                        >
+                          {isTranscribing ? (
+                            <><MicOff className="w-4 h-4" /> 停止听写</>
+                          ) : (
+                            <><Mic className="w-4 h-4" /> 语音输入</>
+                          )}
+                        </button>
+                      )}
+                    </div>
                     <textarea
                       className="w-full p-3 border-2 border-emerald-300 rounded-lg focus:border-emerald-500 focus:outline-none"
                       rows={3}
-                      placeholder="输入句子的英文文本..."
+                      placeholder="输入句子的英文文本，或点击右上角语音输入..."
                       value={editText}
                       onChange={(e) => setEditText(e.target.value)}
                       autoFocus
                     />
                     <div className="flex gap-2 mt-3">
                       <button
-                        onClick={saveEditText}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isTranscribing) {
+                            stopListening();
+                            setIsTranscribing(false);
+                          }
+                          saveEditText();
+                        }}
                         className="flex-1 py-2 bg-emerald-500 text-white rounded-lg font-bold hover:bg-emerald-600 flex items-center justify-center gap-1"
                       >
                         <Save className="w-4 h-4" />
                         保存文本
                       </button>
                       <button
-                        onClick={() => setEditingIndex(null)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isTranscribing) {
+                            stopListening();
+                            setIsTranscribing(false);
+                          }
+                          setEditingIndex(null);
+                        }}
                         className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
                       >
                         取消
                       </button>
                     </div>
+                    {isSupported && (
+                      <p className="text-xs text-emerald-600 mt-2 text-center">
+                        💡 点击"语音输入"后朗读句子，系统会自动转成文字，再手动修改调整
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div className="bg-gray-50 rounded-xl p-4">
