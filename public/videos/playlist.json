@@ -1,0 +1,130 @@
+{
+  "videos": [
+    {
+      "id": 1001,
+      "title": "示例课程 - 打招呼",
+      "description": "学习英语日常打招呼用语",
+      "category": "course",
+      "duration": 30,
+      "fileName": "sample-greeting.mp4",
+      "fileType": "video/mp4",
+      "thumbnail": "sample-greeting-thumb.jpg",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "isPreset": true,
+      "sentences": [
+        {
+          "id": "s1",
+          "text": "Hello, how are you?",
+          "startTime": 0,
+          "endTime": 3,
+          "translation": "你好，你好吗？"
+        },
+        {
+          "id": "s2",
+          "text": "I'm fine, thank you.",
+          "startTime": 3,
+          "endTime": 6,
+          "translation": "我很好，谢谢你。"
+        },
+        {
+          "id": "s3",
+          "text": "And you?",
+          "startTime": 6,
+          "endTime": 8,
+          "translation": "你呢？"
+        },
+        {
+          "id": "s4",
+          "text": "I'm great, thanks.",
+          "startTime": 8,
+          "endTime": 11,
+          "translation": "我很棒，谢谢。"
+        }
+      ]
+    },
+    {
+      "id": 2001,
+      "title": "英语学习视频",
+      "description": "手机上传的英语学习视频",
+      "category": "course",
+      "duration": 45,
+      "fileName": "mmexport1782556158760.mp4",
+      "fileType": "video/mp4",
+      "thumbnail": "",
+      "createdAt": "2026-01-02T00:00:00.000Z",
+      "isPreset": true,
+      "sentences": [
+        {
+          "id": "s1",
+          "text": "A bad skunk.It's a pretty Spring day.",
+          "startTime": 0,
+          "endTime": 5,
+          "translation": ""
+        },
+        {
+          "id": "s2",
+          "text": "The squid skids. are in school.",
+          "startTime": 5,
+          "endTime": 9,
+          "translation": ""
+        },
+        {
+          "id": "s3",
+          "text": "",
+          "startTime": 9,
+          "endTime": 13,
+          "translation": ""
+        },
+        {
+          "id": "s4",
+          "text": "",
+          "startTime": 13,
+          "endTime": 18,
+          "translation": ""
+        },
+        {
+          "id": "s5",
+          "text": "",
+          "startTime": 19,
+          "endTime": 24,
+          "translation": ""
+        },
+        {
+          "id": "s6",
+          "text": "",
+          "startTime": 24,
+          "endTime": 27,
+          "translation": ""
+        },
+        {
+          "id": "s7",
+          "text": "",
+          "startTime": 27,
+          "endTime": 31,
+          "translation": ""
+        },
+        {
+          "id": "s8",
+          "text": "",
+          "startTime": 31,
+          "endTime": 35,
+          "translation": ""
+        },
+        {
+          "id": "s9",
+          "text": "",
+          "startTime": 35,
+          "endTime": 40,
+          "translation": ""
+        },
+        {
+          "id": "s10",
+          "text": "",
+          "startTime": 40,
+          "endTime": 45,
+          "translation": ""
+        }
+      ]
+    }
+  ]
+}
