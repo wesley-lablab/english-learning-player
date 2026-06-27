@@ -2,16 +2,19 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Play, Pause, Plus, Trash2, Edit3, Save,
-  Flag, PlayCircle, HelpCircle, ChevronUp, ChevronDown
+  Flag, PlayCircle, HelpCircle, GripVertical,
+  MoveLeft, MoveRight, Scissors, ZoomIn
 } from 'lucide-react';
 import type { Video, Sentence } from '../types';
 import { storageApi } from '../utils/storage';
 import { formatTime, autoSplitSentences } from '../utils/pronunciation';
 
+type DragType = 'start' | 'end' | 'move' | null;
+
 export default function SentenceEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
   
   const [video, setVideo] = useState<Video | null>(null);
   const [loading, setLoading] = useState(true);
@@ -22,6 +25,11 @@ export default function SentenceEditor() {
   const [showHelp, setShowHelp] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragType, setDragType] = useState<DragType>(null);
+  const [dragStartX, setDragStartX] = useState(0);
+  const [dragStartTime, setDragStartTime] = useState(0);
+  const [dragEndTime, setDragEndTime] = useState(0);
 
   const duration = video?.duration || 0;
 
@@ -51,52 +59,145 @@ export default function SentenceEditor() {
   };
 
   const saveSentences = (newSentences: Sentence[]) => {
-    setSentences(newSentences);
-    localStorage.setItem(`sentences_${id}`, JSON.stringify(newSentences));
+    const sorted = [...newSentences].sort((a, b) => a.startTime - b.startTime);
+    setSentences(sorted);
+    localStorage.setItem(`sentences_${id}`, JSON.stringify(sorted));
   };
 
+  const seekTo = useCallback((time: number) => {
+    const video = document.querySelector('video');
+    if (video) {
+      video.currentTime = Math.max(0, Math.min(time, duration));
+      setCurrentTime(Math.max(0, Math.min(time, duration)));
+    }
+  }, [duration]);
+
   const handleTimeUpdate = useCallback(() => {
-    if (videoRef.current) {
-      setCurrentTime(videoRef.current.currentTime);
+    const video = document.querySelector('video');
+    if (video) {
+      setCurrentTime(video.currentTime);
     }
   }, []);
 
-  const playSentence = (index: number) => {
-    if (!videoRef.current || !sentences[index]) return;
-    videoRef.current.currentTime = sentences[index].startTime;
-    videoRef.current.play();
+  const playSentence = useCallback((index: number) => {
+    const video = document.querySelector('video');
+    if (!video || !sentences[index]) return;
+    
+    video.currentTime = sentences[index].startTime;
+    video.play();
     setIsPlaying(true);
     setCurrentIndex(index);
     
     const s = sentences[index];
     const checkEnd = setInterval(() => {
-      if (videoRef.current && videoRef.current.currentTime >= s.endTime) {
-        videoRef.current.pause();
+      const v = document.querySelector('video');
+      if (v && v.currentTime >= s.endTime) {
+        v.pause();
         setIsPlaying(false);
         clearInterval(checkEnd);
       }
     }, 100);
+  }, [sentences]);
+
+  const togglePlay = () => {
+    const video = document.querySelector('video');
+    if (!video) return;
+    if (video.paused) {
+      video.play();
+      setIsPlaying(true);
+    } else {
+      video.pause();
+      setIsPlaying(false);
+    }
   };
 
-  const setAsStartTime = () => {
-    if (editingIndex === null) return;
-    const updated = [...sentences];
-    updated[editingIndex] = {
-      ...updated[editingIndex],
-      startTime: Math.round(currentTime * 10) / 10,
-    };
-    saveSentences(updated);
+  const handleTimelineClick = (e: React.MouseEvent) => {
+    if (!timelineRef.current || duration === 0) return;
+    const rect = timelineRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percent = x / rect.width;
+    const time = percent * duration;
+    seekTo(time);
   };
 
-  const setAsEndTime = () => {
-    if (editingIndex === null) return;
-    const updated = [...sentences];
-    updated[editingIndex] = {
-      ...updated[editingIndex],
-      endTime: Math.round(currentTime * 10) / 10,
-    };
-    saveSentences(updated);
+  const startDrag = (e: React.MouseEvent, index: number, type: DragType) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragIndex(index);
+    setDragType(type);
+    setDragStartX(e.clientX);
+    setDragStartTime(sentences[index].startTime);
+    setDragEndTime(sentences[index].endTime);
+    setCurrentIndex(index);
   };
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (dragIndex === null || !dragType || !timelineRef.current || duration === 0) return;
+    
+    const rect = timelineRef.current.getBoundingClientRect();
+    const dx = e.clientX - dragStartX;
+    const timeDelta = (dx / rect.width) * duration;
+    
+    const updated = [...sentences];
+    let newStart = updated[dragIndex].startTime;
+    let newEnd = updated[dragIndex].endTime;
+    const minDuration = 0.5;
+
+    if (dragType === 'start') {
+      newStart = Math.max(0, dragStartTime + timeDelta);
+      newStart = Math.min(newStart, newEnd - minDuration);
+      if (dragIndex > 0) {
+        newStart = Math.max(newStart, updated[dragIndex - 1].endTime);
+      }
+      updated[dragIndex] = { ...updated[dragIndex], startTime: Math.round(newStart * 10) / 10 };
+    } else if (dragType === 'end') {
+      newEnd = Math.min(duration, dragEndTime + timeDelta);
+      newEnd = Math.max(newEnd, newStart + minDuration);
+      if (dragIndex < updated.length - 1) {
+        newEnd = Math.min(newEnd, updated[dragIndex + 1].startTime);
+      }
+      updated[dragIndex] = { ...updated[dragIndex], endTime: Math.round(newEnd * 10) / 10 };
+    } else if (dragType === 'move') {
+      const newStartMove = dragStartTime + timeDelta;
+      const senDuration = dragEndTime - dragStartTime;
+      let finalStart = newStartMove;
+      
+      if (dragIndex > 0) {
+        finalStart = Math.max(finalStart, updated[dragIndex - 1].endTime);
+      }
+      if (dragIndex < updated.length - 1) {
+        finalStart = Math.min(finalStart, updated[dragIndex + 1].startTime - senDuration);
+      }
+      finalStart = Math.max(0, Math.min(finalStart, duration - senDuration));
+      
+      updated[dragIndex] = {
+        ...updated[dragIndex],
+        startTime: Math.round(finalStart * 10) / 10,
+        endTime: Math.round((finalStart + senDuration) * 10) / 10,
+      };
+    }
+    
+    setSentences(updated);
+  }, [dragIndex, dragType, dragStartX, dragStartTime, dragEndTime, sentences, duration]);
+
+  const handleMouseUp = useCallback(() => {
+    if (dragIndex !== null) {
+      saveSentences([...sentences]);
+    }
+    setDragIndex(null);
+    setDragType(null);
+  }, [dragIndex, sentences, id]);
+
+  useEffect(() => {
+    if (dragIndex !== null) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [dragIndex, handleMouseMove, handleMouseUp]);
 
   const startEditing = (index: number) => {
     setEditingIndex(index);
@@ -120,12 +221,13 @@ export default function SentenceEditor() {
       id: `sentence_${Date.now()}`,
       text: '',
       startTime: Math.round(currentTime * 10) / 10,
-      endTime: Math.round((currentTime + 5) * 10) / 10,
+      endTime: Math.round(Math.min(currentTime + 5, duration) * 10) / 10,
     };
     const updated = [...sentences, newSentence];
     saveSentences(updated);
-    setCurrentIndex(updated.length - 1);
-    setEditingIndex(updated.length - 1);
+    const newIndex = updated.findIndex(s => s.id === newSentence.id);
+    setCurrentIndex(newIndex);
+    setEditingIndex(newIndex);
     setEditText('');
   };
 
@@ -149,14 +251,90 @@ export default function SentenceEditor() {
     setEditingIndex(null);
   };
 
-  const moveSentence = (index: number, direction: 'up' | 'down') => {
-    const target = direction === 'up' ? index - 1 : index + 1;
-    if (target < 0 || target >= sentences.length) return;
+  const setAsStartTime = () => {
+    if (editingIndex === null) return;
     const updated = [...sentences];
-    [updated[index], updated[target]] = [updated[target], updated[index]];
+    let newStart = Math.round(currentTime * 10) / 10;
+    if (editingIndex > 0) {
+      newStart = Math.max(newStart, updated[editingIndex - 1].endTime);
+    }
+    newStart = Math.min(newStart, updated[editingIndex].endTime - 0.5);
+    updated[editingIndex] = {
+      ...updated[editingIndex],
+      startTime: newStart,
+    };
     saveSentences(updated);
-    setCurrentIndex(target);
-    if (editingIndex === index) setEditingIndex(target);
+  };
+
+  const setAsEndTime = () => {
+    if (editingIndex === null) return;
+    const updated = [...sentences];
+    let newEnd = Math.round(currentTime * 10) / 10;
+    if (editingIndex < updated.length - 1) {
+      newEnd = Math.min(newEnd, updated[editingIndex + 1].startTime);
+    }
+    newEnd = Math.max(newEnd, updated[editingIndex].startTime + 0.5);
+    updated[editingIndex] = {
+      ...updated[editingIndex],
+      endTime: newEnd,
+    };
+    saveSentences(updated);
+  };
+
+  const splitAtCurrent = () => {
+    if (sentences.length === 0) {
+      addSentence();
+      return;
+    }
+    
+    const targetIdx = sentences.findIndex((s, i) => {
+      const next = sentences[i + 1];
+      return currentTime >= s.startTime && (!next || currentTime < next.startTime);
+    });
+    
+    if (targetIdx >= 0) {
+      const s = sentences[targetIdx];
+      if (currentTime > s.startTime + 0.3 && currentTime < s.endTime - 0.3) {
+        const first: Sentence = {
+          ...s,
+          id: `sentence_${Date.now()}_1`,
+          endTime: Math.round(currentTime * 10) / 10,
+        };
+        const second: Sentence = {
+          ...s,
+          id: `sentence_${Date.now()}_2`,
+          startTime: Math.round(currentTime * 10) / 10,
+          text: '',
+        };
+        const updated = sentences.filter((_, i) => i !== targetIdx);
+        updated.splice(targetIdx, 0, first, second);
+        saveSentences(updated);
+        setCurrentIndex(targetIdx);
+      }
+    }
+  };
+
+  const nudgeTime = (index: number, type: 'start' | 'end', delta: number) => {
+    const updated = [...sentences];
+    const s = updated[index];
+    
+    if (type === 'start') {
+      let newStart = s.startTime + delta;
+      newStart = Math.max(0, Math.min(newStart, s.endTime - 0.5));
+      if (index > 0) {
+        newStart = Math.max(newStart, updated[index - 1].endTime);
+      }
+      updated[index] = { ...s, startTime: Math.round(newStart * 10) / 10 };
+    } else {
+      let newEnd = s.endTime + delta;
+      newEnd = Math.min(duration, Math.max(newEnd, s.startTime + 0.5));
+      if (index < updated.length - 1) {
+        newEnd = Math.min(newEnd, updated[index + 1].startTime);
+      }
+      updated[index] = { ...s, endTime: Math.round(newEnd * 10) / 10 };
+    }
+    
+    saveSentences(updated);
   };
 
   if (loading) {
@@ -181,10 +359,19 @@ export default function SentenceEditor() {
     );
   }
 
+  const colors = [
+    'from-blue-400 to-blue-600',
+    'from-emerald-400 to-emerald-600',
+    'from-purple-400 to-purple-600',
+    'from-orange-400 to-orange-600',
+    'from-pink-400 to-pink-600',
+    'from-cyan-400 to-cyan-600',
+    'from-yellow-400 to-yellow-600',
+  ];
+
   return (
     <div className="min-h-screen bg-gray-50">
       <video
-        ref={videoRef}
         src={video.fileDataUrl}
         className="hidden"
         onTimeUpdate={handleTimeUpdate}
@@ -193,8 +380,8 @@ export default function SentenceEditor() {
         onEnded={() => setIsPlaying(false)}
       />
 
-      <header className="bg-white border-b shadow-sm">
-        <div className="max-w-5xl mx-auto px-6 py-4">
+      <header className="bg-white border-b shadow-sm sticky top-0 z-20">
+        <div className="max-w-6xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <button
               onClick={() => navigate('/parent/dashboard')}
@@ -217,24 +404,37 @@ export default function SentenceEditor() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-6">
+      <main className="max-w-6xl mx-auto px-6 py-6">
         {showHelp && (
           <div className="mb-6 bg-blue-50 border border-blue-200 rounded-2xl p-5">
-            <h3 className="font-bold text-blue-800 mb-3">💡 编辑句子使用指南</h3>
-            <div className="space-y-2 text-sm text-blue-700">
-              <p><strong>第一步：</strong>播放视频，找到句子开始的地方，点"设开始"</p>
-              <p><strong>第二步：</strong>播放到句子结束，点"设结束"</p>
-              <p><strong>第三步：</strong>点"编辑"输入句子的英文内容</p>
-              <p><strong>提示：</strong>可以用"自动分割"快速生成5个平均时间段，再逐个调整</p>
+            <h3 className="font-bold text-blue-800 mb-3">💡 使用指南</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-700">
+              <div>
+                <p className="font-medium mb-1">时间轴操作：</p>
+                <ul className="space-y-1 ml-4 list-disc">
+                  <li><strong>点击时间轴</strong>：跳转到该位置播放</li>
+                  <li><strong>拖动句子中间</strong>：整体移动句子位置</li>
+                  <li><strong>拖动句子左边缘</strong>：调整开始时间</li>
+                  <li><strong>拖动句子右边缘</strong>：调整结束时间</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-medium mb-1">文字编辑：</p>
+                <ul className="space-y-1 ml-4 list-disc">
+                  <li>点句子的「编辑」按钮修改英文文本</li>
+                  <li>句子之间自动对齐，不会重叠</li>
+                  <li>可以用「在当前位置拆分」添加句子</li>
+                </ul>
+              </div>
             </div>
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 左侧：视频和时间轴 */}
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl shadow-lg p-4">
-              <div className="relative bg-black rounded-xl overflow-hidden aspect-video mb-4">
+        {/* 视频播放器 */}
+        <div className="bg-white rounded-2xl shadow-lg p-4 mb-6">
+          <div className="flex gap-6">
+            <div className="flex-1">
+              <div className="relative bg-black rounded-xl overflow-hidden aspect-video">
                 <video
                   src={video.fileDataUrl}
                   className="w-full h-full object-contain"
@@ -242,222 +442,368 @@ export default function SentenceEditor() {
                   onTimeUpdate={handleTimeUpdate}
                 />
               </div>
-
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-gray-500">{formatTime(currentTime)}</span>
-                  <span className="text-sm text-gray-500">{formatTime(duration)}</span>
+            </div>
+            <div className="w-64 space-y-3">
+              <div className="bg-gray-50 rounded-xl p-4">
+                <div className="text-2xl font-mono font-bold text-gray-800 text-center mb-2">
+                  {formatTime(currentTime)}
                 </div>
-                <div className="relative h-10 bg-gray-100 rounded-lg overflow-hidden">
-                  {sentences.map((s, i) => (
-                    <div
-                      key={s.id}
-                      className={`absolute top-0 h-full cursor-pointer ${
-                        i === editingIndex ? 'bg-emerald-500/60' :
-                        i === currentIndex ? 'bg-blue-500/60' :
-                        'bg-gray-300/60 hover:bg-gray-400/60'
-                      }`}
-                      style={{
-                        left: `${(s.startTime / duration) * 100}%`,
-                        width: `${Math.max(2, ((s.endTime - s.startTime) / duration) * 100)}%`,
-                      }}
-                      onClick={() => setCurrentIndex(i)}
-                    >
-                      <div className="absolute inset-0 flex items-center justify-center text-xs text-white font-bold">
-                        {i + 1}
-                      </div>
-                    </div>
-                  ))}
-                  <div
-                    className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10"
-                    style={{ left: `${(currentTime / duration) * 100}%` }}
-                  />
+                <div className="text-xs text-gray-500 text-center">
+                  总时长：{formatTime(duration)}
                 </div>
               </div>
+              <button
+                onClick={togglePlay}
+                className="w-full py-3 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-600 flex items-center justify-center gap-2"
+              >
+                {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+                {isPlaying ? '暂停' : '播放'}
+              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => seekTo(Math.max(0, currentTime - 3))}
+                  className="py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium"
+                >
+                  ⏪ -3秒
+                </button>
+                <button
+                  onClick={() => seekTo(Math.min(duration, currentTime + 3))}
+                  className="py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium"
+                >
+                  +3秒 ⏩
+                </button>
+              </div>
+              <button
+                onClick={splitAtCurrent}
+                className="w-full py-2 bg-orange-100 text-orange-600 rounded-xl font-medium hover:bg-orange-200 flex items-center justify-center gap-2"
+              >
+                <Scissors className="w-4 h-4" />
+                在当前位置拆分
+              </button>
+            </div>
+          </div>
+        </div>
 
-              {editingIndex !== null && sentences[editingIndex] && (
-                <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="font-bold text-emerald-700">
-                      正在编辑：句子 {editingIndex + 1}
-                    </span>
-                    <span className="text-sm text-emerald-600">
-                      {formatTime(sentences[editingIndex].startTime)} - {formatTime(sentences[editingIndex].endTime)}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      onClick={() => playSentence(editingIndex)}
-                      className="py-2 bg-emerald-500 text-white rounded-lg font-medium hover:bg-emerald-600 flex items-center justify-center gap-1"
-                    >
-                      <PlayCircle className="w-4 h-4" />
-                      播放
-                    </button>
-                    <button
-                      onClick={setAsStartTime}
-                      className="py-2 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 flex items-center justify-center gap-1"
-                    >
-                      <Flag className="w-4 h-4" />
-                      设开始
-                    </button>
-                    <button
-                      onClick={setAsEndTime}
-                      className="py-2 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 flex items-center justify-center gap-1"
-                    >
-                      <Flag className="w-4 h-4" />
-                      设结束
-                    </button>
-                  </div>
-                  <p className="text-xs text-emerald-600 mt-2 text-center">
-                    💡 拖动视频到指定位置后点击按钮
-                  </p>
-                </div>
-              )}
+        {/* 可视化时间轴 */}
+        <div className="bg-white rounded-2xl shadow-lg p-4 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-gray-700 flex items-center gap-2">
+              <ZoomIn className="w-5 h-5 text-blue-500" />
+              可视化时间轴
+            </h3>
+            <div className="flex gap-2">
+              <button
+                onClick={autoSplit}
+                className="text-sm px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200"
+              >
+                自动分割
+              </button>
+              <button
+                onClick={addSentence}
+                className="text-sm px-3 py-1.5 bg-green-100 text-green-600 rounded-lg hover:bg-green-200 flex items-center gap-1"
+              >
+                <Plus className="w-4 h-4" />
+                添加句子
+              </button>
             </div>
           </div>
 
-          {/* 右侧：句子列表 */}
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl shadow-lg p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-gray-700">
-                  句子列表
-                  <span className="text-sm font-normal text-gray-400 ml-2">({sentences.length}句)</span>
-                </h3>
-                <div className="flex gap-2">
-                  <button
-                    onClick={autoSplit}
-                    className="text-sm px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200"
-                  >
-                    自动分割
-                  </button>
-                  <button
-                    onClick={addSentence}
-                    className="text-sm px-3 py-1.5 bg-green-100 text-green-600 rounded-lg hover:bg-green-200 flex items-center gap-1"
-                  >
-                    <Plus className="w-4 h-4" />
-                    添加
-                  </button>
-                </div>
-              </div>
+          {/* 时间刻度 */}
+          <div className="relative mb-2">
+            <div className="flex justify-between text-xs text-gray-400">
+              {Array.from({ length: 11 }).map((_, i) => (
+                <span key={i}>{formatTime((duration / 10) * i)}</span>
+              ))}
+            </div>
+          </div>
 
-              <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-                {sentences.map((s, i) => (
-                  <div
-                    key={s.id}
-                    className={`rounded-xl border-2 transition-all ${
-                      editingIndex === i ? 'border-emerald-400 bg-emerald-50' :
-                      currentIndex === i ? 'border-blue-300 bg-blue-50' :
-                      'border-gray-200 bg-white hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                            editingIndex === i ? 'bg-emerald-500 text-white' :
-                            currentIndex === i ? 'bg-blue-500 text-white' :
-                            'bg-gray-200 text-gray-600'
-                          }`}>
-                            {i + 1}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            {formatTime(s.startTime)} - {formatTime(s.endTime)}
-                          </span>
-                        </div>
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => moveSentence(i, 'up')}
-                            disabled={i === 0}
-                            className="p-1 hover:bg-gray-200 rounded disabled:opacity-30"
-                          >
-                            <ChevronUp className="w-4 h-4 text-gray-500" />
-                          </button>
-                          <button
-                            onClick={() => moveSentence(i, 'down')}
-                            disabled={i === sentences.length - 1}
-                            className="p-1 hover:bg-gray-200 rounded disabled:opacity-30"
-                          >
-                            <ChevronDown className="w-4 h-4 text-gray-500" />
-                          </button>
-                          <button
-                            onClick={() => playSentence(i)}
-                            className="p-1 hover:bg-blue-100 rounded text-blue-600"
-                          >
-                            <Play className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => startEditing(i)}
-                            className="p-1 hover:bg-emerald-100 rounded text-emerald-600"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => deleteSentence(i)}
-                            className="p-1 hover:bg-red-100 rounded text-red-500"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {editingIndex === i ? (
-                        <div>
-                          <textarea
-                            className="w-full p-3 border-2 border-emerald-300 rounded-lg focus:border-emerald-500 focus:outline-none"
-                            rows={2}
-                            placeholder="输入句子文本..."
-                            value={editText}
-                            onChange={(e) => setEditText(e.target.value)}
-                            autoFocus
-                          />
-                          <div className="flex gap-2 mt-2">
-                            <button
-                              onClick={saveEditText}
-                              className="flex-1 py-2 bg-emerald-500 text-white rounded-lg font-bold hover:bg-emerald-600 flex items-center justify-center gap-1"
-                            >
-                              <Save className="w-4 h-4" />
-                              保存句子
-                            </button>
-                            <button
-                              onClick={() => setEditingIndex(null)}
-                              className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
-                            >
-                              取消
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className={`text-sm ${s.text ? 'text-gray-700' : 'text-gray-400 italic'}`}>
-                          {s.text || '（未设置文本，点击编辑按钮添加）'}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+          {/* 时间轴主体 */}
+          <div
+            ref={timelineRef}
+            className="relative h-20 bg-gray-100 rounded-xl overflow-hidden cursor-pointer select-none"
+            onClick={handleTimelineClick}
+            style={{ userSelect: 'none' }}
+          >
+            {/* 刻度线 */}
+            <div className="absolute inset-0 flex justify-between pointer-events-none">
+              {Array.from({ length: 11 }).map((_, i) => (
+                <div key={i} className="w-px h-full bg-gray-200" />
+              ))}
             </div>
 
-            <div className="bg-white rounded-2xl shadow-lg p-4">
-              <h3 className="font-bold text-gray-700 mb-3">📋 编辑步骤</h3>
-              <ol className="space-y-2 text-sm text-gray-600">
-                <li className="flex gap-2">
-                  <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold shrink-0">1</span>
-                  <span>点句子右边的"编辑"按钮开始编辑</span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold shrink-0">2</span>
-                  <span>播放视频到句子开始，点"设开始"</span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold shrink-0">3</span>
-                  <span>播放到句子结束，点"设结束"</span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold shrink-0">4</span>
-                  <span>输入句子文本，点"保存句子"</span>
-                </li>
-              </ol>
+            {/* 句子块 */}
+            {sentences.map((s, i) => {
+              const left = (s.startTime / duration) * 100;
+              const width = Math.max(3, ((s.endTime - s.startTime) / duration) * 100);
+              const colorIdx = i % colors.length;
+              const isActive = currentIndex === i;
+              const isEditing = editingIndex === i;
+              
+              return (
+                <div
+                  key={s.id}
+                  className={`absolute top-2 bottom-2 rounded-lg bg-gradient-to-b ${colors[colorIdx]} ${
+                    isActive ? 'ring-2 ring-offset-1 ring-yellow-400' : ''
+                  } ${isEditing ? 'ring-2 ring-offset-1 ring-emerald-400' : ''}`}
+                  style={{
+                    left: `${left}%`,
+                    width: `${width}%`,
+                    cursor: dragIndex === i && dragType === 'move' ? 'grabbing' : 'grab',
+                    opacity: dragIndex !== null && dragIndex !== i ? 0.6 : 1,
+                    zIndex: isActive || isEditing ? 5 : 1,
+                  }}
+                  onMouseDown={(e) => startDrag(e, i, 'move')}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCurrentIndex(i);
+                  }}
+                >
+                  {/* 左拖动手柄 */}
+                  <div
+                    className="absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize bg-white/30 hover:bg-white/50 rounded-l-lg flex items-center justify-center"
+                    onMouseDown={(e) => startDrag(e, i, 'start')}
+                  >
+                    <GripVertical className="w-3 h-3 text-white/80" />
+                  </div>
+
+                  {/* 中间内容 */}
+                  <div className="absolute inset-x-3 top-0 bottom-0 flex items-center justify-center overflow-hidden pointer-events-none">
+                    <span className="text-white font-bold text-sm truncate px-1">
+                      {i + 1}. {s.text || '（未设置文本）'}
+                    </span>
+                  </div>
+
+                  {/* 右拖动手柄 */}
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize bg-white/30 hover:bg-white/50 rounded-r-lg flex items-center justify-center"
+                    onMouseDown={(e) => startDrag(e, i, 'end')}
+                  >
+                    <GripVertical className="w-3 h-3 text-white/80" />
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* 播放头 */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none z-10"
+              style={{ left: `${(currentTime / duration) * 100}%` }}
+            >
+              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-red-500 rounded-full" />
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-center gap-6 text-xs text-gray-500">
+            <span className="flex items-center gap-1">
+              <GripVertical className="w-3 h-3" /> 拖动边缘调整时间
+            </span>
+            <span className="flex items-center gap-1">
+              <MoveLeft className="w-3 h-3" /> 拖动中间移动位置
+            </span>
+            <span className="flex items-center gap-1">
+              <MoveRight className="w-3 h-3" /> 点击空白跳转播放
+            </span>
+          </div>
+        </div>
+
+        {/* 选中句子详情 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* 当前选中句子 */}
+          <div className="bg-white rounded-2xl shadow-lg p-4">
+            <h3 className="font-bold text-gray-700 mb-4">
+              📝 当前选中：句子 {currentIndex + 1}
+              {sentences[currentIndex] && (
+                <span className="text-sm font-normal text-gray-400 ml-2">
+                  {formatTime(sentences[currentIndex].startTime)} - {formatTime(sentences[currentIndex].endTime)}
+                  （时长 {(sentences[currentIndex].endTime - sentences[currentIndex].startTime).toFixed(1)}秒）
+                </span>
+              )}
+            </h3>
+
+            {sentences[currentIndex] && (
+              <div className="space-y-4">
+                {/* 播放控制 */}
+                <button
+                  onClick={() => playSentence(currentIndex)}
+                  className="w-full py-3 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 flex items-center justify-center gap-2"
+                >
+                  <PlayCircle className="w-5 h-5" />
+                  播放这个句子
+                </button>
+
+                {/* 精确调整 */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-blue-50 rounded-xl p-3">
+                    <div className="text-sm font-medium text-blue-700 mb-2 text-center">开始时间</div>
+                    <div className="text-xl font-mono font-bold text-blue-800 text-center mb-2">
+                      {formatTime(sentences[currentIndex].startTime)}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => nudgeTime(currentIndex, 'start', -0.5)}
+                        className="flex-1 py-1 bg-white rounded text-sm hover:bg-blue-100"
+                      >
+                        -0.5s
+                      </button>
+                      <button
+                        onClick={setAsStartTime}
+                        className="flex-1 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
+                      >
+                        <Flag className="w-3 h-3 inline mr-1" />
+                        设当前
+                      </button>
+                      <button
+                        onClick={() => nudgeTime(currentIndex, 'start', 0.5)}
+                        className="flex-1 py-1 bg-white rounded text-sm hover:bg-blue-100"
+                      >
+                        +0.5s
+                      </button>
+                    </div>
+                  </div>
+                  <div className="bg-orange-50 rounded-xl p-3">
+                    <div className="text-sm font-medium text-orange-700 mb-2 text-center">结束时间</div>
+                    <div className="text-xl font-mono font-bold text-orange-800 text-center mb-2">
+                      {formatTime(sentences[currentIndex].endTime)}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => nudgeTime(currentIndex, 'end', -0.5)}
+                        className="flex-1 py-1 bg-white rounded text-sm hover:bg-orange-100"
+                      >
+                        -0.5s
+                      </button>
+                      <button
+                        onClick={setAsEndTime}
+                        className="flex-1 py-1 bg-orange-500 text-white rounded text-sm hover:bg-orange-600"
+                      >
+                        <Flag className="w-3 h-3 inline mr-1" />
+                        设当前
+                      </button>
+                      <button
+                        onClick={() => nudgeTime(currentIndex, 'end', 0.5)}
+                        className="flex-1 py-1 bg-white rounded text-sm hover:bg-orange-100"
+                      >
+                        +0.5s
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 文本编辑 */}
+                {editingIndex === currentIndex ? (
+                  <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
+                    <textarea
+                      className="w-full p-3 border-2 border-emerald-300 rounded-lg focus:border-emerald-500 focus:outline-none"
+                      rows={3}
+                      placeholder="输入句子的英文文本..."
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      autoFocus
+                    />
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={saveEditText}
+                        className="flex-1 py-2 bg-emerald-500 text-white rounded-lg font-bold hover:bg-emerald-600 flex items-center justify-center gap-1"
+                      >
+                        <Save className="w-4 h-4" />
+                        保存文本
+                      </button>
+                      <button
+                        onClick={() => setEditingIndex(null)}
+                        className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-gray-50 rounded-xl p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className={`text-base flex-1 ${
+                        sentences[currentIndex].text ? 'text-gray-800' : 'text-gray-400 italic'
+                      }`}>
+                        {sentences[currentIndex].text || '（点击编辑按钮添加句子文本）'}
+                      </p>
+                      <button
+                        onClick={() => startEditing(currentIndex)}
+                        className="px-3 py-1 bg-emerald-100 text-emerald-600 rounded-lg hover:bg-emerald-200 flex items-center gap-1 text-sm shrink-0"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                        编辑
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 句子列表 */}
+          <div className="bg-white rounded-2xl shadow-lg p-4">
+            <h3 className="font-bold text-gray-700 mb-4">
+              📋 句子列表
+              <span className="text-sm font-normal text-gray-400 ml-2">({sentences.length}句)</span>
+            </h3>
+
+            <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+              {sentences.map((s, i) => (
+                <div
+                  key={s.id}
+                  className={`rounded-xl border-2 cursor-pointer transition-all ${
+                    currentIndex === i
+                      ? 'border-blue-400 bg-blue-50'
+                      : 'border-gray-200 bg-white hover:border-gray-300'
+                  }`}
+                  onClick={() => setCurrentIndex(i)}
+                >
+                  <div className="p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold bg-gradient-to-b ${colors[i % colors.length]} text-white`}>
+                          {i + 1}
+                        </span>
+                        <span className="text-xs text-gray-500 font-mono">
+                          {formatTime(s.startTime)} - {formatTime(s.endTime)}
+                        </span>
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playSentence(i);
+                          }}
+                          className="p-1.5 hover:bg-blue-100 rounded text-blue-600"
+                        >
+                          <Play className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditing(i);
+                          }}
+                          className="p-1.5 hover:bg-emerald-100 rounded text-emerald-600"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteSentence(i);
+                          }}
+                          className="p-1.5 hover:bg-red-100 rounded text-red-500"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <p className={`text-sm ml-9 truncate ${
+                      s.text ? 'text-gray-700' : 'text-gray-400 italic'
+                    }`}>
+                      {s.text || '（未设置文本）'}
+                    </p>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
