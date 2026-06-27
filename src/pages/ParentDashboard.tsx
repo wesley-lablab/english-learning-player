@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Plus, Trash2, Video as VideoIcon, BarChart3, Clock, LogOut, Upload, ArrowLeft } from 'lucide-react';
+import { Plus, Trash2, Video as VideoIcon, BarChart3, Clock, LogOut, Upload, ArrowLeft, BookOpen } from 'lucide-react';
 import type { Video, StudyStats, StudyRecord } from '../types';
 import { storageApi } from '../utils/storage';
 import { formatDuration, formatDate, getCategoryEmoji } from '../utils';
@@ -183,13 +183,22 @@ export default function ParentDashboard() {
                           {formatDate(video.createdAt)}
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => handleDelete(video.id, video.title)}
-                            className="w-10 h-10 text-red-500 hover:bg-red-50 rounded-lg flex items-center justify-center transition-colors ml-auto"
-                            title="删除"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => navigate(`/parent/editor/${video.id}`)}
+                              className="w-10 h-10 text-emerald-500 hover:bg-emerald-50 rounded-lg flex items-center justify-center transition-colors"
+                              title="编辑跟读句子"
+                            >
+                              <BookOpen className="w-5 h-5" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(video.id, video.title)}
+                              className="w-10 h-10 text-red-500 hover:bg-red-50 rounded-lg flex items-center justify-center transition-colors"
+                              title="删除"
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
