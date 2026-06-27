@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Mic, MicOff, Play, Pause, RotateCcw, 
   CheckCircle, XCircle, Headphones, ChevronRight, ChevronLeft,
-  PlayCircle, Volume2, BarChart3
+  PlayCircle, Volume2, BarChart3, Sparkles
 } from 'lucide-react';
 import type { Video, Sentence } from '../types';
 import { storageApi } from '../utils/storage';
@@ -18,6 +18,7 @@ export default function PracticeSession() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const visibleVideoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -45,6 +46,7 @@ export default function PracticeSession() {
   const [originalPeaks, setOriginalPeaks] = useState<number[]>([]);
   const [recordingPeaks, setRecordingPeaks] = useState<number[]>([]);
   const [extractingOriginal, setExtractingOriginal] = useState(false);
+  const [showWaveformIntro, setShowWaveformIntro] = useState(true);
 
   const { startListening, stopListening, transcript, resetTranscript, isSupported } = useSpeechRecognition({
     language: 'en-US',
@@ -86,24 +88,89 @@ export default function PracticeSession() {
   };
 
   useEffect(() => {
-    if (currentSentence && videoRef.current && video) {
-      extractOriginalWaveform();
+    if (currentSentence && video && video.fileDataUrl) {
+      extractOriginalWaveformOffline();
     }
-  }, [currentIndex, currentSentence]);
+  }, [currentIndex, currentSentence, video]);
 
-  const extractOriginalWaveform = async () => {
-    if (!videoRef.current || !currentSentence || !originalWaveformCanvasRef.current) return;
+  const extractOriginalWaveformOffline = async () => {
+    if (!currentSentence || !video?.fileDataUrl || !originalWaveformCanvasRef.current) return;
     
     setExtractingOriginal(true);
     try {
+      const canvas = originalWaveformCanvasRef.current;
+      
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       
-      const canvas = originalWaveformCanvasRef.current;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+      const response = await fetch(video.fileDataUrl);
+      const arrayBuffer = await response.arrayBuffer();
       
-      canvas.width = canvas.offsetWidth;
-      canvas.height = canvas.offsetHeight;
+      let audioBuffer: AudioBuffer;
+      try {
+        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      } catch (e) {
+        console.warn('无法直接解码视频音频，尝试播放提取方式', e);
+        await extractOriginalWaveformViaPlayback();
+        audioContext.close();
+        return;
+      }
+      
+      const sampleRate = audioBuffer.sampleRate;
+      const startSample = Math.floor(currentSentence.startTime * sampleRate);
+      const endSample = Math.floor(currentSentence.endTime * sampleRate);
+      const channelData = audioBuffer.getChannelData(0);
+      
+      const samples = 80;
+      const totalSamples = endSample - startSample;
+      const blockSize = Math.floor(totalSamples / samples);
+      const peaks: number[] = new Array(samples).fill(0);
+      
+      for (let i = 0; i < samples; i++) {
+        const start = startSample + i * blockSize;
+        const end = start + blockSize;
+        let max = 0;
+        
+        for (let j = start; j < end && j < channelData.length; j++) {
+          const absVal = Math.abs(channelData[j]);
+          if (absVal > max) max = absVal;
+        }
+        
+        peaks[i] = max;
+      }
+      
+      setOriginalPeaks(peaks);
+      
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = canvas.offsetWidth * dpr;
+      canvas.height = canvas.offsetHeight * dpr;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.scale(dpr, dpr);
+      }
+      
+      drawWaveform(canvas, peaks, '#f97316', 'rgba(249, 115, 22, 0.1)');
+      
+      audioContext.close();
+    } catch (e) {
+      console.warn('提取原音波形失败', e);
+    }
+    setExtractingOriginal(false);
+  };
+
+  const extractOriginalWaveformViaPlayback = async () => {
+    if (!videoRef.current || !currentSentence || !originalWaveformCanvasRef.current) return;
+    
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const canvas = originalWaveformCanvasRef.current;
+      
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = canvas.offsetWidth * dpr;
+      canvas.height = canvas.offsetHeight * dpr;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.scale(dpr, dpr);
+      }
       
       const source = audioContext.createMediaElementSource(videoRef.current);
       const analyser = audioContext.createAnalyser();
@@ -172,23 +239,19 @@ export default function PracticeSession() {
       audioContext.close();
       
     } catch (e) {
-      console.warn('提取原音波形失败', e);
+      console.warn('播放提取波形也失败', e);
     }
-    setExtractingOriginal(false);
   };
 
-  const handleTimeUpdate = useCallback(() => {
-  }, []);
-
   const playSentence = useCallback(() => {
-    if (!videoRef.current || !currentSentence) return;
-    videoRef.current.currentTime = currentSentence.startTime;
-    videoRef.current.play();
+    if (!visibleVideoRef.current || !currentSentence) return;
+    visibleVideoRef.current.currentTime = currentSentence.startTime;
+    visibleVideoRef.current.play();
     setIsPlaying(true);
     
     const checkEnd = setInterval(() => {
-      if (videoRef.current && videoRef.current.currentTime >= currentSentence.endTime) {
-        videoRef.current.pause();
+      if (visibleVideoRef.current && visibleVideoRef.current.currentTime >= currentSentence.endTime) {
+        visibleVideoRef.current.pause();
         setIsPlaying(false);
         clearInterval(checkEnd);
       }
@@ -223,8 +286,13 @@ export default function PracticeSession() {
           
           if (recordingWaveformCanvasRef.current) {
             const canvas = recordingWaveformCanvasRef.current;
-            canvas.width = canvas.offsetWidth;
-            canvas.height = canvas.offsetHeight;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = canvas.offsetWidth * dpr;
+            canvas.height = canvas.offsetHeight * dpr;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.scale(dpr, dpr);
+            }
             drawWaveform(canvas, waveform.peaks, '#10b981', 'rgba(16, 185, 129, 0.1)');
           }
         } catch (e) {
@@ -284,10 +352,18 @@ export default function PracticeSession() {
       const rhythm = compareAudioRhythm(originalPeaks, recordingPeaks);
       rhythmScore = rhythm.rhythmScore;
       volumeScore = rhythm.volumeScore;
-      overallScore = Math.round(accuracy * 0.7 + rhythm.overallScore * 0.3);
+      overallScore = Math.round(accuracy * 0.6 + rhythm.overallScore * 0.4);
     }
     
-    setResult({ accuracy, feedback, score, rhythmScore, volumeScore, overallScore });
+    setResult({ 
+      accuracy, 
+      feedback, 
+      score, 
+      rhythmScore, 
+      volumeScore, 
+      overallScore 
+    });
+    setShowWaveformIntro(false);
   };
 
   const handleNext = () => {
@@ -314,8 +390,8 @@ export default function PracticeSession() {
     setIsPlayingRecording(false);
     setRecordingPeaks([]);
     resetTranscript();
-    if (videoRef.current) {
-      videoRef.current.pause();
+    if (visibleVideoRef.current) {
+      visibleVideoRef.current.pause();
     }
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
@@ -370,11 +446,9 @@ export default function PracticeSession() {
         ref={videoRef}
         src={video.fileDataUrl}
         className="hidden"
-        onTimeUpdate={handleTimeUpdate}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        onEnded={() => setIsPlaying(false)}
         crossOrigin="anonymous"
+        playsInline
+        muted
       />
 
       <header className="bg-gradient-to-r from-orange-400 via-orange-500 to-yellow-400 text-white py-4 px-4 shadow-lg">
@@ -414,37 +488,49 @@ export default function PracticeSession() {
               </div>
             </div>
 
-            <div className="bg-white rounded-3xl shadow-xl p-6 mb-6">
-              <div className="text-center mb-4">
-                <div className="inline-block px-4 py-1 bg-orange-100 text-orange-600 rounded-full text-sm font-bold mb-4">
-                  句子 {currentIndex + 1} / {sentences.length}
+            {/* 原音区 */}
+            <div className="bg-white rounded-3xl shadow-xl p-5 mb-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                  <PlayCircle className="w-5 h-5 text-orange-500" />
                 </div>
-                <p className="text-2xl font-bold text-gray-800 leading-relaxed">
-                  {currentSentence.text}
-                </p>
-                <div className="flex items-center justify-center gap-2 mt-3 text-gray-500">
-                  <PlayCircle className="w-4 h-4" />
-                  <span className="text-sm">
+                <div>
+                  <h3 className="font-bold text-gray-700">原音</h3>
+                  <p className="text-xs text-gray-400">
                     {formatTime(currentSentence.startTime)} - {formatTime(currentSentence.endTime)}
-                  </span>
+                  </p>
                 </div>
               </div>
 
+              <p className="text-xl font-bold text-gray-800 leading-relaxed mb-4 px-2">
+                {currentSentence.text}
+              </p>
+
               <div className="mb-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <BarChart3 className="w-4 h-4 text-orange-500" />
-                  <span className="text-sm font-medium text-orange-600">原音波形</span>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-sm font-medium text-orange-500 flex items-center gap-1">
+                    <BarChart3 className="w-4 h-4" />
+                    原音波形
+                  </span>
                   {extractingOriginal && (
                     <span className="text-xs text-orange-400 animate-pulse">分析中...</span>
                   )}
                 </div>
-                <canvas
-                  ref={originalWaveformCanvasRef}
-                  className="w-full h-16 bg-orange-50 rounded-xl"
-                />
+                <div className="relative">
+                  <canvas
+                    ref={originalWaveformCanvasRef}
+                    className="w-full h-20 bg-orange-50 rounded-xl"
+                    style={{ display: 'block' }}
+                  />
+                  {showWaveformIntro && originalPeaks.length === 0 && !extractingOriginal && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <p className="text-sm text-orange-400">点击播放后查看波形 👆</p>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="flex items-center justify-center gap-4 mb-4">
+              <div className="flex items-center justify-center gap-4">
                 <button
                   onClick={handlePrevious}
                   disabled={currentIndex === 0}
@@ -471,16 +557,45 @@ export default function PracticeSession() {
                 </button>
               </div>
 
-              <div className="text-center text-sm text-gray-500">
-                👆 点击播放按钮听原句，观察波形节奏
-              </div>
+              <video
+                ref={visibleVideoRef}
+                src={video.fileDataUrl}
+                className="hidden"
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onEnded={() => setIsPlaying(false)}
+                onTimeUpdate={() => {
+                  if (visibleVideoRef.current && currentSentence) {
+                    if (visibleVideoRef.current.currentTime >= currentSentence.endTime) {
+                      visibleVideoRef.current.pause();
+                    }
+                  }
+                }}
+                playsInline
+              />
             </div>
 
-            <div className="bg-white rounded-3xl shadow-xl p-6 mb-6">
-              <h3 className="text-xl font-bold text-gray-700 mb-4 flex items-center justify-center gap-2">
-                <Headphones className="w-6 h-6 text-emerald-500" />
-                你的跟读
-              </h3>
+            {/* VS 分隔 */}
+            <div className="flex items-center justify-center my-2">
+              <div className="flex-1 h-px bg-gray-200" />
+              <div className="mx-4 px-4 py-2 bg-purple-100 text-purple-600 rounded-full text-sm font-bold flex items-center gap-1">
+                <Sparkles className="w-4 h-4" />
+                波形对比
+              </div>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+
+            {/* 跟读区 */}
+            <div className="bg-white rounded-3xl shadow-xl p-5 mb-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
+                  <Headphones className="w-5 h-5 text-emerald-500" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-700">你的跟读</h3>
+                  <p className="text-xs text-gray-400">点击麦克风开始录音</p>
+                </div>
+              </div>
 
               {!isSupported ? (
                 <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-center">
@@ -488,55 +603,58 @@ export default function PracticeSession() {
                 </div>
               ) : (
                 <>
-                  <div className="flex flex-col items-center gap-3 mb-4">
+                  <div className="flex flex-col items-center gap-2 mb-4">
                     <button
                       onClick={isRecording ? stopRecording : startRecording}
-                      className={`w-24 h-24 rounded-full flex items-center justify-center shadow-xl transition-all ${
+                      className={`w-20 h-20 rounded-full flex items-center justify-center shadow-xl transition-all ${
                         isRecording
                           ? 'bg-red-500 animate-pulse scale-105'
                           : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:scale-105 active:scale-95'
                       }`}
                     >
                       {isRecording ? (
-                        <MicOff className="w-12 h-12 text-white" />
+                        <MicOff className="w-10 h-10 text-white" />
                       ) : (
-                        <Mic className="w-12 h-12 text-white" />
+                        <Mic className="w-10 h-10 text-white" />
                       )}
                     </button>
-                    <p className={`font-bold text-lg ${isRecording ? 'text-red-500' : 'text-gray-600'}`}>
+                    <p className={`font-bold ${isRecording ? 'text-red-500' : 'text-gray-600'}`}>
                       {isRecording ? '🔴 录音中... 点击停止' : '🎤 点击开始跟读'}
                     </p>
                   </div>
 
                   {recordingPeaks.length > 0 && (
                     <div className="mb-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <BarChart3 className="w-4 h-4 text-emerald-500" />
-                        <span className="text-sm font-medium text-emerald-600">你的录音波形</span>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-sm font-medium text-emerald-500 flex items-center gap-1">
+                          <BarChart3 className="w-4 h-4" />
+                          你的录音波形
+                        </span>
                       </div>
                       <canvas
                         ref={recordingWaveformCanvasRef}
-                        className="w-full h-16 bg-emerald-50 rounded-xl"
+                        className="w-full h-20 bg-emerald-50 rounded-xl"
+                        style={{ display: 'block' }}
                       />
                     </div>
                   )}
 
                   {recordedAudioUrl && !isRecording && (
-                    <div className="mb-4 bg-purple-50 rounded-2xl p-4">
+                    <div className="mb-4 bg-purple-50 rounded-2xl p-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Volume2 className="w-5 h-5 text-purple-500" />
-                          <span className="font-medium text-purple-700">听我刚才读的</span>
+                          <span className="font-medium text-purple-700">回放录音</span>
                         </div>
                         <button
                           onClick={playRecording}
                           disabled={isPlayingRecording}
-                          className="px-5 py-2 bg-purple-500 text-white rounded-xl font-bold hover:bg-purple-600 disabled:opacity-50 flex items-center gap-2"
+                          className="px-4 py-2 bg-purple-500 text-white rounded-xl font-bold hover:bg-purple-600 disabled:opacity-50 flex items-center gap-2"
                         >
                           {isPlayingRecording ? (
                             <><Pause className="w-4 h-4" />播放中</>
                           ) : (
-                            <><Play className="w-4 h-4" />回放</>
+                            <><Play className="w-4 h-4" />听一下</>
                           )}
                         </button>
                       </div>
@@ -544,14 +662,14 @@ export default function PracticeSession() {
                   )}
 
                   {recognizedText && (
-                    <div className="mb-4 bg-gray-50 rounded-2xl p-4">
-                      <p className="text-xs text-gray-500 mb-2">📝 系统识别你读的是：</p>
-                      <p className="text-lg text-gray-800">{recognizedText}</p>
+                    <div className="mb-4 bg-gray-50 rounded-2xl p-3">
+                      <p className="text-xs text-gray-500 mb-1">📝 识别到你读的：</p>
+                      <p className="text-base text-gray-800">{recognizedText}</p>
                     </div>
                   )}
 
                   {result && (
-                    <div className={`rounded-2xl p-5 ${
+                    <div className={`rounded-2xl p-4 ${
                       result.score === 'excellent' ? 'bg-green-100' :
                       result.score === 'good' ? 'bg-blue-100' :
                       result.score === 'fair' ? 'bg-yellow-100' : 'bg-red-100'
@@ -559,66 +677,82 @@ export default function PracticeSession() {
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                           {result.score === 'excellent' || result.score === 'good' ? (
-                            <CheckCircle className="w-8 h-8 text-green-600" />
+                            <CheckCircle className="w-7 h-7 text-green-600" />
                           ) : (
-                            <XCircle className="w-8 h-8 text-red-600" />
+                            <XCircle className="w-7 h-7 text-red-600" />
                           )}
-                          <span className="text-2xl font-bold">
+                          <span className="text-xl font-bold">
                             {result.score === 'excellent' ? '太棒了！🎉' :
                              result.score === 'good' ? '很好！💪' :
                              result.score === 'fair' ? '还不错 😊' : '继续加油 💪'}
                           </span>
                         </div>
                         <div className="text-right">
-                          <div className="text-4xl font-bold text-emerald-600">
-                            {result.overallScore || result.accuracy}%
+                          <div className="text-3xl font-bold text-emerald-600">
+                            {result.overallScore !== undefined ? result.overallScore : result.accuracy}%
                           </div>
                           <div className="text-xs text-gray-500">综合得分</div>
                         </div>
                       </div>
 
                       {(result.rhythmScore !== undefined || result.volumeScore !== undefined) && (
-                        <div className="grid grid-cols-2 gap-3 mb-4">
-                          <div className="bg-white/60 rounded-xl p-3">
-                            <div className="text-xs text-gray-500 mb-1">节奏相似度</div>
-                            <div className="text-xl font-bold text-orange-500">{result.rhythmScore}%</div>
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                          <div className="bg-white/60 rounded-xl p-2.5">
+                            <div className="text-xs text-gray-500 mb-0.5">🎵 节奏相似度</div>
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-orange-500 rounded-full"
+                                  style={{ width: `${result.rhythmScore}%` }}
+                                />
+                              </div>
+                              <span className="text-base font-bold text-orange-500">{result.rhythmScore}%</span>
+                            </div>
                           </div>
-                          <div className="bg-white/60 rounded-xl p-3">
-                            <div className="text-xs text-gray-500 mb-1">音量匹配</div>
-                            <div className="text-xl font-bold text-purple-500">{result.volumeScore}%</div>
+                          <div className="bg-white/60 rounded-xl p-2.5">
+                            <div className="text-xs text-gray-500 mb-0.5">🔊 音量匹配</div>
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-purple-500 rounded-full"
+                                  style={{ width: `${result.volumeScore}%` }}
+                                />
+                              </div>
+                              <span className="text-base font-bold text-purple-500">{result.volumeScore}%</span>
+                            </div>
                           </div>
                         </div>
                       )}
 
-                      <div className="bg-white/40 rounded-xl p-3 mb-4">
-                        <div className="text-xs text-gray-500 mb-1">发音准确度</div>
-                        <div className="flex items-center gap-3">
-                          <div className="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-emerald-500 rounded-full transition-all"
-                              style={{ width: `${result.accuracy}%` }}
-                            />
-                          </div>
-                          <span className="font-bold text-emerald-600">{result.accuracy}%</span>
+                      <div className="bg-white/40 rounded-xl p-2.5 mb-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-gray-500">发音准确度</span>
+                          <span className="text-sm font-bold text-emerald-600">{result.accuracy}%</span>
+                        </div>
+                        <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-emerald-500 rounded-full transition-all"
+                            style={{ width: `${result.accuracy}%` }}
+                          />
                         </div>
                       </div>
 
-                      <p className="text-lg text-gray-700 mb-4">{result.feedback}</p>
-                      <div className="flex gap-3">
+                      <p className="text-base text-gray-700 mb-3">{result.feedback}</p>
+                      <div className="flex gap-2">
                         <button
                           onClick={resetState}
-                          className="flex-1 py-3 bg-white rounded-xl font-bold hover:bg-gray-100 flex items-center justify-center gap-2"
+                          className="flex-1 py-2.5 bg-white rounded-xl font-bold hover:bg-gray-100 flex items-center justify-center gap-1"
                         >
-                          <RotateCcw className="w-5 h-5" />
+                          <RotateCcw className="w-4 h-4" />
                           再读一遍
                         </button>
                         {currentIndex < sentences.length - 1 && (
                           <button
                             onClick={handleNext}
-                            className="flex-1 py-3 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 flex items-center justify-center gap-2"
+                            className="flex-1 py-2.5 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 flex items-center justify-center gap-1"
                           >
                             下一句
-                            <ChevronRight className="w-5 h-5" />
+                            <ChevronRight className="w-4 h-4" />
                           </button>
                         )}
                       </div>
@@ -629,9 +763,9 @@ export default function PracticeSession() {
                     <div className="flex justify-center">
                       <button
                         onClick={handleCompare}
-                        className="px-10 py-4 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-2xl font-bold text-xl shadow-lg hover:scale-105 transition-transform active:scale-95"
+                        className="px-8 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-2xl font-bold text-lg shadow-lg hover:scale-105 transition-transform active:scale-95"
                       >
-                        📊 看看我读得怎么样
+                        📊 对比评分
                       </button>
                     </div>
                   )}
@@ -641,7 +775,7 @@ export default function PracticeSession() {
 
             <div className="bg-white/60 rounded-2xl p-4 text-center">
               <p className="text-sm text-gray-500">
-                💡 小提示：注意观察波形的起伏，尽量跟原音的节奏一样哦！
+                💡 小提示：看看上下两个波形，尽量让你的跟读波形跟原音的起伏一样哦！
               </p>
             </div>
           </>
