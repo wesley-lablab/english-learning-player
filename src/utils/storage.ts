@@ -1,10 +1,10 @@
 import type { Video, Category, StudyRecord, Settings, StudyStats } from '../types';
-import { 
-  saveVideoToIndexedDB, 
-  getVideoFromIndexedDB, 
+import { STATIC_VIDEOS } from '../data/staticVideos';
+import {
+  saveVideoToIndexedDB,
+  getVideoFromIndexedDB,
   deleteVideoFromIndexedDB,
   checkStorageAvailable,
-  formatBytes 
 } from './indexedDB';
 
 const STORAGE_KEYS = {
@@ -44,15 +44,24 @@ function generateId(): number {
   return Date.now() + Math.floor(Math.random() * 1000);
 }
 
+function getLocalVideos(): Video[] {
+  const localVideos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+  return localVideos.filter((video) => !STATIC_VIDEOS.some((staticVideo) => staticVideo.id === video.id));
+}
+
+function getAllVideos(): Video[] {
+  return [...STATIC_VIDEOS, ...getLocalVideos()];
+}
+
 export const storageApi = {
   videos: {
     list: (category?: string): Promise<{ success: boolean; data: Video[] }> => {
       return new Promise((resolve) => {
-        const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+        const videos = getAllVideos();
         const filtered = category && category !== 'all'
           ? videos.filter(v => v.category === category)
           : videos;
-        resolve({ success: true, data: filtered.sort((a, b) => 
+        resolve({ success: true, data: filtered.sort((a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         ) });
       });
@@ -68,7 +77,7 @@ export const storageApi = {
       return new Promise(async (resolve) => {
         try {
           if (onProgress) onProgress(5);
-          
+
           const storageCheck = await checkStorageAvailable(100);
           if (!storageCheck.available) {
             resolve({
@@ -105,35 +114,35 @@ export const storageApi = {
             videoEl.preload = 'auto';
             videoEl.muted = true;
             videoEl.playsInline = true;
-            
+
             let resolved = false;
             const safeResolve = () => {
               if (!resolved) {
                 resolved = true;
               }
             };
-            
+
             await new Promise<void>((resolveVideo) => {
               const finish = () => {
                 safeResolve();
                 resolveVideo();
               };
-              
+
               const timeout = setTimeout(finish, 8000);
-              
+
               videoEl.onloadedmetadata = () => {
                 if (resolved) return;
                 video.duration = Math.round(videoEl.duration);
-                
+
                 const canvas = document.createElement('canvas');
                 canvas.width = 320;
                 canvas.height = 180;
                 const ctx = canvas.getContext('2d');
-                
+
                 try {
                   const seekTime = Math.min(1, videoEl.duration / 2);
                   videoEl.currentTime = seekTime;
-                  
+
                   videoEl.onseeked = () => {
                     if (resolved) return;
                     try {
@@ -153,23 +162,22 @@ export const storageApi = {
                       finish();
                     }
                   };
-                  
+
                   videoEl.onerror = () => {
                     clearTimeout(timeout);
                     finish();
                   };
-                  
                 } catch {
                   clearTimeout(timeout);
                   finish();
                 }
               };
-              
+
               videoEl.onerror = () => {
                 clearTimeout(timeout);
                 finish();
               };
-              
+
               const objectUrl = URL.createObjectURL(file);
               videoEl.src = objectUrl;
               videoEl.load();
@@ -184,7 +192,7 @@ export const storageApi = {
               file: file,
               thumbnail: thumbnailBlob,
             });
-          } catch (e) {
+          } catch {
             resolve({
               success: false,
               error: '存储空间不足，无法保存视频！请删除一些旧视频后再试。',
@@ -200,14 +208,13 @@ export const storageApi = {
             video.thumbnail = URL.createObjectURL(file);
           }
 
-          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+          const videos = getLocalVideos();
           videos.push(video);
           saveToStorage(STORAGE_KEYS.VIDEOS, videos);
 
           if (onProgress) onProgress(100);
 
           resolve({ success: true, data: video });
-
         } catch (err) {
           resolve({
             success: false,
@@ -220,9 +227,15 @@ export const storageApi = {
     get: (id: number): Promise<{ success: boolean; data?: Video; error?: string }> => {
       return new Promise(async (resolve) => {
         try {
-          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+          const staticVideo = STATIC_VIDEOS.find(v => v.id === id);
+          if (staticVideo) {
+            resolve({ success: true, data: staticVideo });
+            return;
+          }
+
+          const videos = getLocalVideos();
           const video = videos.find(v => v.id === id);
-          
+
           if (!video) {
             resolve({ success: false, error: '视频不存在' });
             return;
@@ -239,7 +252,7 @@ export const storageApi = {
           }
 
           resolve({ success: true, data: video });
-        } catch (err) {
+        } catch {
           resolve({ success: false, error: '读取失败' });
         }
       });
@@ -247,7 +260,12 @@ export const storageApi = {
 
     update: (id: number, data: Partial<Video>): Promise<{ success: boolean; data?: Video; error?: string }> => {
       return new Promise((resolve) => {
-        const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+        if (STATIC_VIDEOS.some(v => v.id === id)) {
+          resolve({ success: false, error: '固定视频请在 src/data/staticVideos.ts 中修改' });
+          return;
+        }
+
+        const videos = getLocalVideos();
         const index = videos.findIndex(v => v.id === id);
         if (index >= 0) {
           videos[index] = { ...videos[index], ...data };
@@ -262,19 +280,24 @@ export const storageApi = {
     delete: (id: number): Promise<{ success: boolean; error?: string }> => {
       return new Promise(async (resolve) => {
         try {
-          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+          if (STATIC_VIDEOS.some(v => v.id === id)) {
+            resolve({ success: false, error: '固定视频不能在后台删除，请从 GitHub 的 public/videos 和 staticVideos.ts 中移除' });
+            return;
+          }
+
+          const videos = getLocalVideos();
           const filtered = videos.filter(v => v.id !== id);
           saveToStorage(STORAGE_KEYS.VIDEOS, filtered);
           localStorage.removeItem(`sentences_${id}`);
-          
+
           try {
             await deleteVideoFromIndexedDB(id);
           } catch (e) {
             console.warn('删除IndexedDB中的视频失败', e);
           }
-          
+
           resolve({ success: true });
-        } catch (e) {
+        } catch {
           resolve({ success: false, error: '删除失败' });
         }
       });
@@ -331,7 +354,7 @@ export const storageApi = {
         const records = getFromStorage<StudyRecord[]>(STORAGE_KEYS.RECORDS, []);
         resolve({
           success: true,
-          data: records.sort((a, b) => 
+          data: records.sort((a, b) =>
             new Date(b.watchedAt).getTime() - new Date(a.watchedAt).getTime()
           ),
         });
@@ -360,7 +383,7 @@ export const storageApi = {
 
     stats: (): Promise<{ success: boolean; data: StudyStats }> => {
       return new Promise((resolve) => {
-        const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+        const videos = getAllVideos();
         const records = getFromStorage<StudyRecord[]>(STORAGE_KEYS.RECORDS, []);
         const totalDuration = records.reduce((sum, r) => sum + r.watchedDuration, 0);
         resolve({
