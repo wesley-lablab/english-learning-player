@@ -8,15 +8,17 @@ interface SpeechRecognitionResult {
 
 interface UseSpeechRecognitionOptions {
   language?: string;
+  continuous?: boolean;
   onResult?: (result: SpeechRecognitionResult) => void;
   onError?: (error: string) => void;
 }
 
 export function useSpeechRecognition(options: UseSpeechRecognitionOptions = {}) {
-  const { language = 'en-US', onResult, onError } = options;
+  const { language = 'en-US', continuous = false, onResult, onError } = options;
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const recognitionRef = useRef<any>(null);
+  const finalTranscriptRef = useRef('');
 
   const startListening = useCallback(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -27,10 +29,12 @@ export function useSpeechRecognition(options: UseSpeechRecognitionOptions = {}) 
     const SpeechRecognition = (window.SpeechRecognition || (window as any).webkitSpeechRecognition);
     const recognition = new SpeechRecognition();
     
-    recognition.continuous = false;
+    recognition.continuous = continuous;
     recognition.interimResults = true;
     recognition.lang = language;
     recognition.maxAlternatives = 1;
+
+    finalTranscriptRef.current = '';
 
     recognition.onstart = () => {
       setIsListening(true);
@@ -38,27 +42,26 @@ export function useSpeechRecognition(options: UseSpeechRecognitionOptions = {}) 
     };
 
     recognition.onresult = (event: any) => {
-      let finalTranscript = '';
       let interimTranscript = '';
       let confidence = 0;
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
-          finalTranscript += result[0].transcript;
+          finalTranscriptRef.current += result[0].transcript;
           confidence = result[0].confidence;
         } else {
           interimTranscript += result[0].transcript;
         }
       }
 
-      const currentTranscript = finalTranscript || interimTranscript;
+      const currentTranscript = finalTranscriptRef.current + interimTranscript;
       setTranscript(currentTranscript);
       
       onResult?.({
         transcript: currentTranscript,
         confidence,
-        isFinal: !!finalTranscript,
+        isFinal: !interimTranscript,
       });
     };
 
@@ -73,7 +76,7 @@ export function useSpeechRecognition(options: UseSpeechRecognitionOptions = {}) 
 
     recognitionRef.current = recognition;
     recognition.start();
-  }, [language, onResult, onError]);
+  }, [language, continuous, onResult, onError]);
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {

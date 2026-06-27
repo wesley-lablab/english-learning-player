@@ -36,14 +36,12 @@ export default function SentenceEditor() {
   const videoPlaybackRef = useRef<HTMLVideoElement | null>(null);
   const transcribeEndCheckRef = useRef<number | null>(null);
 
-  const { startListening, stopListening, transcript, resetTranscript, isSupported } = useSpeechRecognition({
+  const { startListening, stopListening, transcript, resetTranscript, isSupported, isListening } = useSpeechRecognition({
     language: 'en-US',
+    continuous: true,
     onResult: (res) => {
-      if (res.isFinal && editingIndex !== null) {
-        setEditText(prev => {
-          const text = res.transcript.trim();
-          return prev ? prev + ' ' + text : text;
-        });
+      if (editingIndex !== null) {
+        setEditText(res.transcript.trim());
       }
     },
   });
@@ -239,6 +237,10 @@ export default function SentenceEditor() {
   }, [stopListening]);
 
   const startMicTranscribe = () => {
+    if (editingIndex === null) {
+      startEditing(currentIndex);
+    }
+    setEditText('');
     resetTranscript();
     startListening();
     setIsTranscribing(true);
@@ -248,6 +250,11 @@ export default function SentenceEditor() {
   const startVideoTranscribe = async () => {
     if (!sentences[currentIndex]) return;
     
+    if (editingIndex === null) {
+      startEditing(currentIndex);
+    }
+    
+    setEditText('');
     resetTranscript();
     
     const videos = document.querySelectorAll('video');
@@ -280,7 +287,7 @@ export default function SentenceEditor() {
           videoPlaybackRef.current.pause();
           setTimeout(() => {
             stopTranscribe();
-          }, 1500);
+          }, 1000);
         }
       }, 100);
       
