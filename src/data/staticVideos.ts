@@ -1,5 +1,7 @@
 import type { Video } from '../types';
 
+const videoUrl = (fileName: string) => `${import.meta.env.BASE_URL}videos/${fileName}`;
+
 /**
  * Static videos that are committed to GitHub under public/videos.
  *
@@ -18,7 +20,7 @@ export const STATIC_VIDEOS: Video[] = [
     fileName: 'sample1.mp4',
     thumbnail: '',
     createdAt: '2026-06-27T00:00:00.000Z',
-    fileDataUrl: '/videos/sample1.mp4',
+    fileDataUrl: videoUrl('sample1.mp4'),
     fileType: 'video/mp4',
   },
   {
@@ -30,7 +32,7 @@ export const STATIC_VIDEOS: Video[] = [
     fileName: 'sample2.mp4',
     thumbnail: '',
     createdAt: '2026-06-27T00:00:00.000Z',
-    fileDataUrl: '/videos/sample2.mp4',
+    fileDataUrl: videoUrl('sample2.mp4'),
     fileType: 'video/mp4',
   },
   {
@@ -42,7 +44,7 @@ export const STATIC_VIDEOS: Video[] = [
     fileName: 'sample3.mp4',
     thumbnail: '',
     createdAt: '2026-06-27T00:00:00.000Z',
-    fileDataUrl: '/videos/sample3.mp4',
+    fileDataUrl: videoUrl('sample3.mp4'),
     fileType: 'video/mp4',
   },
 ];
