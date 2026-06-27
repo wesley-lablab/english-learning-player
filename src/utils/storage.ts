@@ -1,8 +1,7 @@
-import type { Video, Category, StudyRecord, Settings, StudyStats } from '../types';
-import { STATIC_VIDEOS } from '../data/staticVideos';
-import {
-  saveVideoToIndexedDB,
-  getVideoFromIndexedDB,
+import type { Video, Category, StudyRecord, Settings, StudyStats, Sentence } from '../types';
+import { 
+  saveVideoToIndexedDB, 
+  getVideoFromIndexedDB, 
   deleteVideoFromIndexedDB,
   checkStorageAvailable,
 } from './indexedDB';
@@ -13,6 +12,7 @@ const STORAGE_KEYS = {
   SETTINGS: 'elp_settings',
   ADMIN_TOKEN: 'elp_admin_token',
   ADMIN_PASSWORD: 'elp_admin_password',
+  PRESET_SENTENCES: 'elp_preset_sentences',
 };
 
 const DEFAULT_CATEGORIES: Category[] = [
@@ -26,6 +26,46 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 const DEFAULT_PASSWORD = '123456';
+
+interface PresetVideo extends Video {
+  sentences?: Sentence[];
+}
+
+interface PresetPlaylist {
+  videos: PresetVideo[];
+}
+
+let presetVideosCache: PresetVideo[] | null = null;
+
+async function loadPresetVideos(): Promise<PresetVideo[]> {
+  if (presetVideosCache) {
+    return presetVideosCache;
+  }
+  
+  try {
+    const baseUrl = import.meta.env.BASE_URL || '/';
+    const response = await fetch(`${baseUrl}videos/playlist.json?t=${Date.now()}`);
+    if (!response.ok) {
+      presetVideosCache = [];
+      return [];
+    }
+    const data: PresetPlaylist = await response.json();
+    
+    const videosWithUrls = data.videos.map(v => ({
+      ...v,
+      fileDataUrl: `${baseUrl}videos/${v.fileName}`,
+      thumbnail: v.thumbnail ? `${baseUrl}videos/${v.thumbnail}` : '',
+      isPreset: true,
+    }));
+    
+    presetVideosCache = videosWithUrls;
+    return videosWithUrls;
+  } catch (e) {
+    console.warn('加载预置视频失败', e);
+    presetVideosCache = [];
+    return [];
+  }
+}
 
 function getFromStorage<T>(key: string, defaultValue: T): T {
   try {
@@ -55,6 +95,7 @@ function getAllVideos(): Video[] {
 
 export const storageApi = {
   videos: {
+<<<<<<< Updated upstream
     list: (category?: string): Promise<{ success: boolean; data: Video[] }> => {
       return new Promise((resolve) => {
         const videos = getAllVideos();
@@ -62,9 +103,23 @@ export const storageApi = {
           ? videos.filter(v => v.category === category)
           : videos;
         resolve({ success: true, data: filtered.sort((a, b) =>
+=======
+    list: async (category?: string): Promise<{ success: boolean; data: Video[] }> => {
+      const localVideos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+      const presetVideos = await loadPresetVideos();
+      
+      const allVideos = [...presetVideos, ...localVideos];
+      const filtered = category && category !== 'all'
+        ? allVideos.filter(v => v.category === category)
+        : allVideos;
+      
+      return {
+        success: true,
+        data: filtered.sort((a, b) => 
+>>>>>>> Stashed changes
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        ) });
-      });
+        ),
+      };
     },
 
     upload: async (
@@ -227,6 +282,7 @@ export const storageApi = {
     get: (id: number): Promise<{ success: boolean; data?: Video; error?: string }> => {
       return new Promise(async (resolve) => {
         try {
+<<<<<<< Updated upstream
           const staticVideo = STATIC_VIDEOS.find(v => v.id === id);
           if (staticVideo) {
             resolve({ success: true, data: staticVideo });
@@ -234,6 +290,17 @@ export const storageApi = {
           }
 
           const videos = getLocalVideos();
+=======
+          const presetVideos = await loadPresetVideos();
+          const presetVideo = presetVideos.find(v => v.id === id);
+          
+          if (presetVideo) {
+            resolve({ success: true, data: presetVideo });
+            return;
+          }
+          
+          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+>>>>>>> Stashed changes
           const video = videos.find(v => v.id === id);
 
           if (!video) {
@@ -299,6 +366,44 @@ export const storageApi = {
           resolve({ success: true });
         } catch {
           resolve({ success: false, error: '删除失败' });
+        }
+      });
+    },
+
+    getSentences: async (videoId: number): Promise<{ success: boolean; data: Sentence[]; error?: string }> => {
+      try {
+        const presetVideos = await loadPresetVideos();
+        const presetVideo = presetVideos.find(v => v.id === videoId);
+        
+        if (presetVideo && presetVideo.sentences && presetVideo.sentences.length > 0) {
+          const saved = localStorage.getItem(`sentences_${videoId}`);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed.length > 0) {
+              return { success: true, data: parsed };
+            }
+          }
+          return { success: true, data: presetVideo.sentences };
+        }
+        
+        const saved = localStorage.getItem(`sentences_${videoId}`);
+        if (saved) {
+          return { success: true, data: JSON.parse(saved) };
+        }
+        
+        return { success: true, data: [] };
+      } catch (e) {
+        return { success: false, data: [], error: '读取句子失败' };
+      }
+    },
+
+    saveSentences: (videoId: number, sentences: Sentence[]): Promise<{ success: boolean; error?: string }> => {
+      return new Promise((resolve) => {
+        try {
+          localStorage.setItem(`sentences_${videoId}`, JSON.stringify(sentences));
+          resolve({ success: true });
+        } catch (e) {
+          resolve({ success: false, error: '保存失败' });
         }
       });
     },

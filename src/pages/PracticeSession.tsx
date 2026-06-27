@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Mic, MicOff, Play, Pause, RotateCcw, 
   CheckCircle, XCircle, Headphones, ChevronRight, ChevronLeft,
-  PlayCircle, Volume2, BarChart3, Sparkles
+  PlayCircle, Volume2, BarChart3, Sparkles, Repeat, Repeat1
 } from 'lucide-react';
 import type { Video, Sentence } from '../types';
 import { storageApi } from '../utils/storage';
@@ -47,6 +47,8 @@ export default function PracticeSession() {
   const [recordingPeaks, setRecordingPeaks] = useState<number[]>([]);
   const [extractingOriginal, setExtractingOriginal] = useState(false);
   const [showWaveformIntro, setShowWaveformIntro] = useState(true);
+  const [loopMode, setLoopMode] = useState<'none' | 'single' | 'all'>('none');
+  const loopModeRef = useRef<'none' | 'single' | 'all'>('none');
 
   const { startListening, stopListening, transcript, resetTranscript, isSupported } = useSpeechRecognition({
     language: 'en-US',
@@ -70,14 +72,11 @@ export default function PracticeSession() {
       const res = await storageApi.videos.get(parseInt(id, 10));
       if (res.data) {
         setVideo(res.data);
-        const saved = localStorage.getItem(`sentences_${id}`);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          const hasText = parsed.filter((s: Sentence) => s.text).length;
+        const sentencesRes = await storageApi.videos.getSentences(parseInt(id, 10));
+        if (sentencesRes.success && sentencesRes.data.length > 0) {
+          const hasText = sentencesRes.data.filter((s: Sentence) => s.text).length;
           if (hasText > 0) {
-            setSentences(parsed);
-          } else {
-            setSentences([]);
+            setSentences(sentencesRes.data);
           }
         }
       }
@@ -243,20 +242,40 @@ export default function PracticeSession() {
     }
   };
 
-  const playSentence = useCallback(() => {
-    if (!visibleVideoRef.current || !currentSentence) return;
-    visibleVideoRef.current.currentTime = currentSentence.startTime;
+  const playSentence = useCallback((index?: number) => {
+    const targetIndex = index !== undefined ? index : currentIndex;
+    const sentence = sentences[targetIndex];
+    if (!visibleVideoRef.current || !sentence) return;
+    
+    if (index !== undefined) {
+      setCurrentIndex(index);
+    }
+    
+    visibleVideoRef.current.currentTime = sentence.startTime;
     visibleVideoRef.current.play();
     setIsPlaying(true);
+  }, [currentIndex, sentences]);
+
+  const handleSentenceEnded = useCallback(() => {
+    const mode = loopModeRef.current;
     
-    const checkEnd = setInterval(() => {
-      if (visibleVideoRef.current && visibleVideoRef.current.currentTime >= currentSentence.endTime) {
-        visibleVideoRef.current.pause();
-        setIsPlaying(false);
-        clearInterval(checkEnd);
+    if (mode === 'single') {
+      if (visibleVideoRef.current && currentSentence) {
+        visibleVideoRef.current.currentTime = currentSentence.startTime;
+        visibleVideoRef.current.play();
       }
-    }, 100);
-  }, [currentSentence]);
+    } else if (mode === 'all') {
+      const nextIndex = currentIndex < sentences.length - 1 ? currentIndex + 1 : 0;
+      const nextSentence = sentences[nextIndex];
+      if (visibleVideoRef.current && nextSentence) {
+        setCurrentIndex(nextIndex);
+        visibleVideoRef.current.currentTime = nextSentence.startTime;
+        visibleVideoRef.current.play();
+      }
+    } else {
+      setIsPlaying(false);
+    }
+  }, [currentIndex, sentences, currentSentence]);
 
   const startRecording = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -500,6 +519,31 @@ export default function PracticeSession() {
                     {formatTime(currentSentence.startTime)} - {formatTime(currentSentence.endTime)}
                   </p>
                 </div>
+                <div className="flex-1" />
+                <button
+                  onClick={() => {
+                    const modes: ('none' | 'single' | 'all')[] = ['none', 'single', 'all'];
+                    const currentIdx = modes.indexOf(loopMode);
+                    const nextMode = modes[(currentIdx + 1) % modes.length];
+                    setLoopMode(nextMode);
+                    loopModeRef.current = nextMode;
+                  }}
+                  className={`px-4 py-2 rounded-2xl font-bold text-base flex items-center gap-1.5 transition-all shadow-sm border-2 ${
+                    loopMode === 'none'
+                      ? 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
+                      : loopMode === 'single'
+                      ? 'bg-orange-100 text-orange-600 border-orange-300 hover:bg-orange-200'
+                      : 'bg-emerald-100 text-emerald-600 border-emerald-300 hover:bg-emerald-200'
+                  }`}
+                >
+                  {loopMode === 'single' ? (
+                    <Repeat1 className="w-5 h-5" />
+                  ) : (
+                    <Repeat className="w-5 h-5" />
+                  )}
+                  {loopMode === 'none' ? '循环' :
+                   loopMode === 'single' ? '单曲' : '全部'}
+                </button>
               </div>
 
               <p className="text-xl font-bold text-gray-800 leading-relaxed mb-4 px-2">
@@ -530,7 +574,7 @@ export default function PracticeSession() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-center gap-4">
+              <div className="flex items-center justify-center gap-3 mb-4">
                 <button
                   onClick={handlePrevious}
                   disabled={currentIndex === 0}
@@ -539,7 +583,7 @@ export default function PracticeSession() {
                   <ChevronLeft className="w-6 h-6 text-gray-600" />
                 </button>
                 <button
-                  onClick={playSentence}
+                  onClick={() => playSentence()}
                   className="w-16 h-16 bg-gradient-to-r from-orange-400 to-yellow-500 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-transform active:scale-95"
                 >
                   {isPlaying ? (
@@ -568,6 +612,7 @@ export default function PracticeSession() {
                   if (visibleVideoRef.current && currentSentence) {
                     if (visibleVideoRef.current.currentTime >= currentSentence.endTime) {
                       visibleVideoRef.current.pause();
+                      handleSentenceEnded();
                     }
                   }
                 }}

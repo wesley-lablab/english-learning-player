@@ -67,6 +67,41 @@ export default function ParentDashboard() {
     navigate('/');
   };
 
+  const handleExportData = async () => {
+    try {
+      const videosRes = await storageApi.videos.list();
+      const localVideos = videosRes.data?.filter(v => !v.isPreset) || [];
+      
+      const exportData: any = {
+        exportTime: new Date().toISOString(),
+        videos: [],
+      };
+
+      for (const video of localVideos) {
+        const sentencesRes = await storageApi.videos.getSentences(video.id);
+        exportData.videos.push({
+          ...video,
+          sentences: sentencesRes.data,
+        });
+      }
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `elp-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      alert('导出成功！请把下载的文件发送给开发者。');
+    } catch (e) {
+      console.error(e);
+      alert('导出失败');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-lg">
@@ -85,6 +120,13 @@ export default function ParentDashboard() {
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <button
+                onClick={handleExportData}
+                className="flex items-center gap-2 bg-green-500 text-white px-4 py-2.5 rounded-xl font-bold hover:bg-green-600 transition-colors shadow-md"
+              >
+                <span className="text-lg">📤</span>
+                导出数据
+              </button>
               <button
                 onClick={() => navigate('/parent/upload')}
                 className="flex items-center gap-2 bg-white text-blue-600 px-5 py-2.5 rounded-xl font-bold hover:bg-blue-50 transition-colors shadow-md"

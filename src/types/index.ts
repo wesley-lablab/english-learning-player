@@ -9,6 +9,7 @@ export interface Video {
   createdAt: string;
   fileDataUrl?: string;
   fileType?: string;
+  isPreset?: boolean;
 }
 
 export interface Category {
