@@ -5,6 +5,7 @@ import VideoPlay from "@/pages/VideoPlay";
 import ParentLogin from "@/pages/ParentLogin";
 import ParentDashboard from "@/pages/ParentDashboard";
 import UploadVideo from "@/pages/UploadVideo";
+import PracticeSession from "@/pages/PracticeSession";
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="/" element={<RoleSelect />} />
         <Route path="/kid" element={<KidVideoList />} />
         <Route path="/kid/video/:id" element={<VideoPlay />} />
+        <Route path="/kid/practice/:id" element={<PracticeSession />} />
         <Route path="/parent/login" element={<ParentLogin />} />
         <Route path="/parent/dashboard" element={<ParentDashboard />} />
         <Route path="/parent/upload" element={<UploadVideo />} />

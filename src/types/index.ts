@@ -43,3 +43,11 @@ export interface StudyStats {
 export type PlaybackRate = 0.5 | 0.75 | 1 | 1.25 | 1.5 | 2;
 
 export const PLAYBACK_RATES: PlaybackRate[] = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+export interface Sentence {
+  id: string;
+  text: string;
+  startTime: number;
+  endTime: number;
+  translation?: string;
+}

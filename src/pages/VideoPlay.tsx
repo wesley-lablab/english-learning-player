@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, RotateCcw } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Mic } from 'lucide-react';
 import type { Video, PlaybackRate } from '../types';
 import { storageApi } from '../utils/storage';
 
@@ -139,13 +139,20 @@ export default function VideoPlay() {
           onEnded={saveRecord}
         />
 
-        <div className="mt-8 flex justify-center gap-4">
+        <div className="mt-8 flex flex-wrap justify-center gap-4">
           <button
             onClick={handleReplay}
             className="flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-green-400 to-green-600 text-white rounded-2xl text-xl font-bold shadow-lg hover:scale-105 transition-transform"
           >
             <RotateCcw className="w-6 h-6" />
             再看一遍
+          </button>
+          <button
+            onClick={() => navigate(`/kid/practice/${video.id}`)}
+            className="flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-purple-400 to-pink-600 text-white rounded-2xl text-xl font-bold shadow-lg hover:scale-105 transition-transform"
+          >
+            <Mic className="w-6 h-6" />
+            跟读练习
           </button>
           <button
             onClick={() => navigate('/kid')}
