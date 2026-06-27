@@ -32,6 +32,9 @@ export default function SentenceEditor() {
   const [dragStartTime, setDragStartTime] = useState(0);
   const [dragEndTime, setDragEndTime] = useState(0);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcribeSource, setTranscribeSource] = useState<'video' | 'mic' | null>(null);
+  const videoPlaybackRef = useRef<HTMLVideoElement | null>(null);
+  const transcribeEndCheckRef = useRef<number | null>(null);
 
   const { startListening, stopListening, transcript, resetTranscript, isSupported } = useSpeechRecognition({
     language: 'en-US',
@@ -217,6 +220,74 @@ export default function SentenceEditor() {
     setEditingIndex(index);
     setEditText(sentences[index].text);
     setCurrentIndex(index);
+  };
+
+  const stopTranscribe = useCallback(() => {
+    stopListening();
+    setIsTranscribing(false);
+    setTranscribeSource(null);
+    
+    if (transcribeEndCheckRef.current) {
+      clearInterval(transcribeEndCheckRef.current);
+      transcribeEndCheckRef.current = null;
+    }
+    
+    if (videoPlaybackRef.current) {
+      videoPlaybackRef.current.pause();
+      videoPlaybackRef.current = null;
+    }
+  }, [stopListening]);
+
+  const startMicTranscribe = () => {
+    resetTranscript();
+    startListening();
+    setIsTranscribing(true);
+    setTranscribeSource('mic');
+  };
+
+  const startVideoTranscribe = async () => {
+    if (!sentences[currentIndex]) return;
+    
+    resetTranscript();
+    
+    const videos = document.querySelectorAll('video');
+    const videoEl = videos[0];
+    if (!videoEl) return;
+    
+    videoPlaybackRef.current = videoEl;
+    
+    try {
+      startListening();
+      setIsTranscribing(true);
+      setTranscribeSource('video');
+      
+      const s = sentences[currentIndex];
+      videoEl.currentTime = s.startTime;
+      
+      await new Promise<void>((resolve) => {
+        const onSeeked = () => {
+          videoEl.removeEventListener('seeked', onSeeked);
+          resolve();
+        };
+        videoEl.addEventListener('seeked', onSeeked);
+      });
+      
+      videoEl.play();
+      
+      transcribeEndCheckRef.current = window.setInterval(() => {
+        if (!videoPlaybackRef.current) return;
+        if (videoPlaybackRef.current.currentTime >= sentences[currentIndex].endTime) {
+          videoPlaybackRef.current.pause();
+          setTimeout(() => {
+            stopTranscribe();
+          }, 1500);
+        }
+      }, 100);
+      
+    } catch (e) {
+      console.error('视频转文字失败', e);
+      stopTranscribe();
+    }
   };
 
   const saveEditText = () => {
@@ -649,55 +720,123 @@ export default function SentenceEditor() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-blue-50 rounded-xl p-3">
                     <div className="text-sm font-medium text-blue-700 mb-2 text-center">开始时间</div>
-                    <div className="text-xl font-mono font-bold text-blue-800 text-center mb-2">
-                      {formatTime(sentences[currentIndex].startTime)}
+                    <div className="flex items-center justify-center gap-1 mb-2">
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        value={sentences[currentIndex].startTime.toFixed(1)}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          if (!isNaN(val) && val >= 0) {
+                            const updated = [...sentences];
+                            let newStart = val;
+                            if (currentIndex > 0) {
+                              newStart = Math.max(newStart, updated[currentIndex - 1].endTime);
+                            }
+                            newStart = Math.min(newStart, updated[currentIndex].endTime - 0.5);
+                            updated[currentIndex] = {
+                              ...updated[currentIndex],
+                              startTime: Math.round(newStart * 10) / 10,
+                            };
+                            saveSentences(updated);
+                          }
+                        }}
+                        className="w-20 px-2 py-1 text-center text-lg font-mono font-bold text-blue-800 border-2 border-blue-200 rounded-lg focus:border-blue-500 focus:outline-none"
+                      />
+                      <span className="text-blue-600 font-medium">秒</span>
                     </div>
                     <div className="flex gap-1">
                       <button
-                        onClick={() => nudgeTime(currentIndex, 'start', -0.5)}
+                        onClick={() => nudgeTime(currentIndex, 'start', -1)}
                         className="flex-1 py-1 bg-white rounded text-sm hover:bg-blue-100"
                       >
-                        -0.5s
+                        -1s
+                      </button>
+                      <button
+                        onClick={() => nudgeTime(currentIndex, 'start', -0.1)}
+                        className="flex-1 py-1 bg-white rounded text-sm hover:bg-blue-100"
+                      >
+                        -0.1s
                       </button>
                       <button
                         onClick={setAsStartTime}
                         className="flex-1 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
                       >
-                        <Flag className="w-3 h-3 inline mr-1" />
                         设当前
                       </button>
                       <button
-                        onClick={() => nudgeTime(currentIndex, 'start', 0.5)}
+                        onClick={() => nudgeTime(currentIndex, 'start', 0.1)}
                         className="flex-1 py-1 bg-white rounded text-sm hover:bg-blue-100"
                       >
-                        +0.5s
+                        +0.1s
+                      </button>
+                      <button
+                        onClick={() => nudgeTime(currentIndex, 'start', 1)}
+                        className="flex-1 py-1 bg-white rounded text-sm hover:bg-blue-100"
+                      >
+                        +1s
                       </button>
                     </div>
                   </div>
                   <div className="bg-orange-50 rounded-xl p-3">
                     <div className="text-sm font-medium text-orange-700 mb-2 text-center">结束时间</div>
-                    <div className="text-xl font-mono font-bold text-orange-800 text-center mb-2">
-                      {formatTime(sentences[currentIndex].endTime)}
+                    <div className="flex items-center justify-center gap-1 mb-2">
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        value={sentences[currentIndex].endTime.toFixed(1)}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          if (!isNaN(val) && val > 0) {
+                            const updated = [...sentences];
+                            let newEnd = val;
+                            if (currentIndex < updated.length - 1) {
+                              newEnd = Math.min(newEnd, updated[currentIndex + 1].startTime);
+                            }
+                            newEnd = Math.max(newEnd, updated[currentIndex].startTime + 0.5);
+                            updated[currentIndex] = {
+                              ...updated[currentIndex],
+                              endTime: Math.round(newEnd * 10) / 10,
+                            };
+                            saveSentences(updated);
+                          }
+                        }}
+                        className="w-20 px-2 py-1 text-center text-lg font-mono font-bold text-orange-800 border-2 border-orange-200 rounded-lg focus:border-orange-500 focus:outline-none"
+                      />
+                      <span className="text-orange-600 font-medium">秒</span>
                     </div>
                     <div className="flex gap-1">
                       <button
-                        onClick={() => nudgeTime(currentIndex, 'end', -0.5)}
+                        onClick={() => nudgeTime(currentIndex, 'end', -1)}
                         className="flex-1 py-1 bg-white rounded text-sm hover:bg-orange-100"
                       >
-                        -0.5s
+                        -1s
+                      </button>
+                      <button
+                        onClick={() => nudgeTime(currentIndex, 'end', -0.1)}
+                        className="flex-1 py-1 bg-white rounded text-sm hover:bg-orange-100"
+                      >
+                        -0.1s
                       </button>
                       <button
                         onClick={setAsEndTime}
                         className="flex-1 py-1 bg-orange-500 text-white rounded text-sm hover:bg-orange-600"
                       >
-                        <Flag className="w-3 h-3 inline mr-1" />
                         设当前
                       </button>
                       <button
-                        onClick={() => nudgeTime(currentIndex, 'end', 0.5)}
+                        onClick={() => nudgeTime(currentIndex, 'end', 0.1)}
                         className="flex-1 py-1 bg-white rounded text-sm hover:bg-orange-100"
                       >
-                        +0.5s
+                        +0.1s
+                      </button>
+                      <button
+                        onClick={() => nudgeTime(currentIndex, 'end', 1)}
+                        className="flex-1 py-1 bg-white rounded text-sm hover:bg-orange-100"
+                      >
+                        +1s
                       </button>
                     </div>
                   </div>
@@ -706,50 +845,72 @@ export default function SentenceEditor() {
                 {/* 文本编辑 */}
                 {editingIndex === currentIndex ? (
                   <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-emerald-700">句子文本</span>
-                      {isSupported && (
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-bold text-emerald-700">📝 句子文本</span>
+                    </div>
+
+                    {isSupported && (
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startVideoTranscribe();
+                          }}
+                          disabled={isTranscribing}
+                          className={`flex items-center justify-center gap-1.5 text-sm py-2 rounded-lg ${
+                            isTranscribing && transcribeSource === 'video'
+                              ? 'bg-red-100 text-red-600 animate-pulse'
+                              : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                          } disabled:opacity-60`}
+                        >
+                          <PlayCircle className="w-4 h-4" />
+                          {isTranscribing && transcribeSource === 'video' ? '识别中...' : '播放视频转文字'}
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             if (isTranscribing) {
-                              stopListening();
-                              setIsTranscribing(false);
+                              stopTranscribe();
                             } else {
-                              startListening();
-                              setIsTranscribing(true);
+                              startMicTranscribe();
                             }
                           }}
-                          className={`flex items-center gap-1 text-sm px-3 py-1 rounded-lg ${
-                            isTranscribing 
-                              ? 'bg-red-100 text-red-600 animate-pulse' 
-                              : 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'
+                          className={`flex items-center justify-center gap-1.5 text-sm py-2 rounded-lg ${
+                            isTranscribing && transcribeSource === 'mic'
+                              ? 'bg-red-100 text-red-600 animate-pulse'
+                              : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
                           }`}
                         >
-                          {isTranscribing ? (
-                            <><MicOff className="w-4 h-4" /> 停止听写</>
-                          ) : (
-                            <><Mic className="w-4 h-4" /> 语音输入</>
-                          )}
+                          <Mic className="w-4 h-4" />
+                          {isTranscribing && transcribeSource === 'mic' ? '停止听写' : '麦克风输入'}
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    )}
+
                     <textarea
-                      className="w-full p-3 border-2 border-emerald-300 rounded-lg focus:border-emerald-500 focus:outline-none"
+                      className="w-full p-3 border-2 border-emerald-300 rounded-lg focus:border-emerald-500 focus:outline-none text-base"
                       rows={3}
-                      placeholder="输入句子的英文文本，或点击右上角语音输入..."
+                      placeholder="在这里输入句子的英文文本，或用上方的功能自动识别..."
                       value={editText}
                       onChange={(e) => setEditText(e.target.value)}
-                      autoFocus
                     />
+
                     <div className="flex gap-2 mt-3">
+                      {isTranscribing && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            stopTranscribe();
+                          }}
+                          className="px-4 py-2 bg-red-500 text-white rounded-lg font-bold hover:bg-red-600"
+                        >
+                          停止
+                        </button>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (isTranscribing) {
-                            stopListening();
-                            setIsTranscribing(false);
-                          }
+                          if (isTranscribing) stopTranscribe();
                           saveEditText();
                         }}
                         className="flex-1 py-2 bg-emerald-500 text-white rounded-lg font-bold hover:bg-emerald-600 flex items-center justify-center gap-1"
@@ -760,10 +921,7 @@ export default function SentenceEditor() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (isTranscribing) {
-                            stopListening();
-                            setIsTranscribing(false);
-                          }
+                          if (isTranscribing) stopTranscribe();
                           setEditingIndex(null);
                         }}
                         className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
@@ -771,11 +929,12 @@ export default function SentenceEditor() {
                         取消
                       </button>
                     </div>
-                    {isSupported && (
-                      <p className="text-xs text-emerald-600 mt-2 text-center">
-                        💡 点击"语音输入"后朗读句子，系统会自动转成文字，再手动修改调整
-                      </p>
-                    )}
+
+                    <p className="text-xs text-emerald-600 mt-2">
+                      💡 <strong>播放视频转文字：</strong>播放这句视频，同时用麦克风识别视频里的英文，识别完自动填进去，再手动调整
+                      <br />
+                      💡 <strong>麦克风输入：</strong>自己对着麦克风读句子，系统转成文字
+                    </p>
                   </div>
                 ) : (
                   <div className="bg-gray-50 rounded-xl p-4">
