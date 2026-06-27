@@ -1,4 +1,11 @@
 import type { Video, Category, StudyRecord, Settings, StudyStats } from '../types';
+import { 
+  saveVideoToIndexedDB, 
+  getVideoFromIndexedDB, 
+  deleteVideoFromIndexedDB,
+  checkStorageAvailable,
+  formatBytes 
+} from './indexedDB';
 
 const STORAGE_KEYS = {
   VIDEOS: 'elp_videos',
@@ -51,18 +58,6 @@ export const storageApi = {
       });
     },
 
-    get: (id: number): Promise<{ success: boolean; data?: Video; error?: string }> => {
-      return new Promise((resolve) => {
-        const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-        const video = videos.find(v => v.id === id);
-        if (video) {
-          resolve({ success: true, data: video });
-        } else {
-          resolve({ success: false, error: '视频不存在' });
-        }
-      });
-    },
-
     upload: async (
       file: File,
       title: string,
@@ -70,135 +65,149 @@ export const storageApi = {
       category: string,
       onProgress?: (percent: number) => void
     ): Promise<{ success: boolean; data?: Video; error?: string }> => {
-      return new Promise((resolve, reject) => {
-        const MAX_SIZE = 50 * 1024 * 1024;
-        if (file.size > MAX_SIZE) {
-          resolve({ 
-            success: false, 
-            error: `文件太大了（${(file.size / 1024 / 1024).toFixed(1)}MB），请上传50MB以内的文件` 
-          });
-          return;
-        }
-
-        const reader = new FileReader();
-        let fileDataUrl = '';
-
-        reader.onprogress = (event) => {
-          if (event.lengthComputable && onProgress) {
-            const readProgress = (event.loaded / event.total) * 70;
-            onProgress(Math.round(readProgress));
-          }
-        };
-
-        reader.onload = (e) => {
-          fileDataUrl = e.target?.result as string;
+      return new Promise(async (resolve) => {
+        try {
+          if (onProgress) onProgress(5);
           
-          if (onProgress) onProgress(75);
+          const storageCheck = await checkStorageAvailable(100);
+          if (!storageCheck.available) {
+            resolve({
+              success: false,
+              error: `存储空间不足！${storageCheck.message}。请先删除一些旧视频。`,
+            });
+            return;
+          }
 
-          setTimeout(() => {
-            try {
-              const isVideo = file.type.startsWith('video/');
-              
-              const video: Video = {
-                id: generateId(),
-                title,
-                description,
-                category,
-                duration: 0,
-                fileName: file.name,
-                thumbnail: isVideo ? '' : fileDataUrl,
-                createdAt: new Date().toISOString(),
-                fileDataUrl,
-                fileType: file.type,
-              } as Video & { fileDataUrl: string; fileType: string };
+          if (onProgress) onProgress(10);
 
-              if (onProgress) onProgress(85);
+          const isVideo = file.type.startsWith('video/');
+          const videoId = generateId();
 
-              const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-              videos.push(video);
-              
-              try {
-                saveToStorage(STORAGE_KEYS.VIDEOS, videos);
-              } catch (saveError) {
-                resolve({ 
-                  success: false, 
-                  error: '存储空间不足！浏览器存储有限，请删除一些旧视频后再上传' 
-                });
-                return;
-              }
+          const video: Video = {
+            id: videoId,
+            title,
+            description,
+            category,
+            duration: 0,
+            fileName: file.name,
+            thumbnail: '',
+            createdAt: new Date().toISOString(),
+            fileDataUrl: '',
+            fileType: file.type,
+          };
 
-              if (onProgress) onProgress(95);
+          if (onProgress) onProgress(30);
 
-              if (isVideo) {
-                const videoEl = document.createElement('video');
-                videoEl.preload = 'metadata';
-                videoEl.onloadedmetadata = () => {
-                  video.duration = Math.round(videoEl.duration);
-                  
+          let thumbnailBlob: Blob | undefined;
+
+          if (isVideo) {
+            const videoEl = document.createElement('video');
+            videoEl.preload = 'metadata';
+            
+            await new Promise<void>((resolveVideo) => {
+              videoEl.onloadedmetadata = () => {
+                video.duration = Math.round(videoEl.duration);
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = 320;
+                canvas.height = 180;
+                const ctx = canvas.getContext('2d');
+                
+                videoEl.currentTime = Math.min(1, videoEl.duration / 2);
+                videoEl.onseeked = () => {
                   try {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 320;
-                    canvas.height = 180;
-                    const ctx = canvas.getContext('2d');
-                    
-                    videoEl.currentTime = Math.min(1, videoEl.duration / 2);
-                    videoEl.onseeked = () => {
-                      try {
-                        if (ctx) {
-                          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-                          video.thumbnail = canvas.toDataURL('image/jpeg', 0.7);
-                        }
-                      } catch (e) {
-                        console.warn('缩略图生成失败', e);
-                      }
-                      
-                      try {
-                        const allVideos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-                        const idx = allVideos.findIndex(v => v.id === video.id);
-                        if (idx >= 0) {
-                          allVideos[idx] = video;
-                          saveToStorage(STORAGE_KEYS.VIDEOS, allVideos);
-                        }
-                      } catch (e) {
-                        console.warn('保存缩略图失败', e);
-                      }
-                      
-                      if (onProgress) onProgress(100);
-                    };
-                  } catch (e) {
-                    console.warn('处理视频信息失败', e);
-                    if (onProgress) onProgress(100);
+                    if (ctx) {
+                      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+                      canvas.toBlob((blob) => {
+                        thumbnailBlob = blob || undefined;
+                        resolveVideo();
+                      }, 'image/jpeg', 0.7);
+                    } else {
+                      resolveVideo();
+                    }
+                  } catch {
+                    resolveVideo();
                   }
                 };
-                videoEl.onerror = () => {
-                  if (onProgress) onProgress(100);
-                };
-                videoEl.src = fileDataUrl;
-              } else {
-                if (onProgress) onProgress(100);
-              }
-
-              setTimeout(() => {
-                resolve({ success: true, data: video });
-              }, 200);
+                
+                videoEl.onerror = () => resolveVideo();
+                
+                const objectUrl = URL.createObjectURL(file);
+                videoEl.src = objectUrl;
+              };
               
-            } catch (err) {
-              resolve({ 
-                success: false, 
-                error: '上传失败：' + (err as Error).message 
-              });
-            }
-          }, 100);
-        };
+              videoEl.onerror = () => resolveVideo();
+              
+              const objectUrl = URL.createObjectURL(file);
+              videoEl.src = objectUrl;
+            });
+          }
 
-        reader.onerror = () => {
-          resolve({ success: false, error: '文件读取失败，请重试' });
-        };
+          if (onProgress) onProgress(60);
 
-        try {
-          reader.readAsDataURL(file);
+          try {
+            await saveVideoToIndexedDB({
+              id: videoId,
+              file: file,
+              thumbnail: thumbnailBlob,
+            });
+          } catch (e) {
+            resolve({
+              success: false,
+              error: '存储空间不足，无法保存视频！请删除一些旧视频后再试。',
+            });
+            return;
+          }
+
+          if (onProgress) onProgress(90);
+
+          if (thumbnailBlob) {
+            video.thumbnail = URL.createObjectURL(thumbnailBlob);
+          } else if (!isVideo) {
+            video.thumbnail = URL.createObjectURL(file);
+          }
+
+          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+          videos.push(video);
+          saveToStorage(STORAGE_KEYS.VIDEOS, videos);
+
+          if (onProgress) onProgress(100);
+
+          resolve({ success: true, data: video });
+
         } catch (err) {
-          resolve({ success: false, error: '文件读取失败' });
+          resolve({
+            success: false,
+            error: '上传失败：' + (err as Error).message,
+          });
+        }
+      });
+    },
+
+    get: (id: number): Promise<{ success: boolean; data?: Video; error?: string }> => {
+      return new Promise(async (resolve) => {
+        try {
+          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+          const video = videos.find(v => v.id === id);
+          
+          if (!video) {
+            resolve({ success: false, error: '视频不存在' });
+            return;
+          }
+
+          if (!video.fileDataUrl) {
+            const stored = await getVideoFromIndexedDB(id);
+            if (stored && stored.file) {
+              video.fileDataUrl = URL.createObjectURL(stored.file);
+              if (stored.thumbnail && !video.thumbnail) {
+                video.thumbnail = URL.createObjectURL(stored.thumbnail);
+              }
+            }
+          }
+
+          resolve({ success: true, data: video });
+        } catch (err) {
+          resolve({ success: false, error: '读取失败' });
         }
       });
     },
@@ -218,12 +227,23 @@ export const storageApi = {
     },
 
     delete: (id: number): Promise<{ success: boolean; error?: string }> => {
-      return new Promise((resolve) => {
-        const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-        const filtered = videos.filter(v => v.id !== id);
-        saveToStorage(STORAGE_KEYS.VIDEOS, filtered);
-        localStorage.removeItem(`sentences_${id}`);
-        resolve({ success: true });
+      return new Promise(async (resolve) => {
+        try {
+          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+          const filtered = videos.filter(v => v.id !== id);
+          saveToStorage(STORAGE_KEYS.VIDEOS, filtered);
+          localStorage.removeItem(`sentences_${id}`);
+          
+          try {
+            await deleteVideoFromIndexedDB(id);
+          } catch (e) {
+            console.warn('删除IndexedDB中的视频失败', e);
+          }
+          
+          resolve({ success: true });
+        } catch (e) {
+          resolve({ success: false, error: '删除失败' });
+        }
       });
     },
   },

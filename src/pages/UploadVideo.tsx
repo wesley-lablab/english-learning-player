@@ -31,14 +31,6 @@ export default function UploadVideo() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      const MAX_SIZE = 50 * 1024 * 1024;
-      if (selectedFile.size > MAX_SIZE) {
-        setError(`文件太大了（${(selectedFile.size / 1024 / 1024).toFixed(1)}MB），请上传50MB以内的文件`);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
-        return;
-      }
       setError('');
       setFile(selectedFile);
       if (!title) {
@@ -192,10 +184,13 @@ export default function UploadVideo() {
               <div className="flex items-center gap-3 mb-3">
                 <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
                 <span className="font-medium text-gray-700">
-                  {progress < 70 ? '读取文件中...' :
-                   progress < 85 ? '保存中...' :
-                   progress < 100 ? '生成缩略图...' :
-                   '即将完成...'} {progress}%
+                  {progress < 10 ? '检查存储空间...' :
+                   progress < 30 ? '读取文件信息...' :
+                   progress < 60 ? '生成缩略图...' :
+                   progress < 90 ? '保存到本地...' :
+                   progress < 100 ? '即将完成...' :
+                   '完成！'}
+                  {progress > 0 && progress < 100 && ` ${progress}%`}
                 </span>
               </div>
               <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
@@ -282,12 +277,12 @@ export default function UploadVideo() {
               {uploading ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  上传中 {progress}%
+                  保存中...
                 </>
               ) : (
                 <>
                   <Upload className="w-5 h-5" />
-                  开始上传
+                  保存到本地
                 </>
               )}
             </button>
