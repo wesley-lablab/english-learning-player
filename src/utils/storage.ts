@@ -70,74 +70,136 @@ export const storageApi = {
       category: string,
       onProgress?: (percent: number) => void
     ): Promise<{ success: boolean; data?: Video; error?: string }> => {
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
+        const MAX_SIZE = 50 * 1024 * 1024;
+        if (file.size > MAX_SIZE) {
+          resolve({ 
+            success: false, 
+            error: `文件太大了（${(file.size / 1024 / 1024).toFixed(1)}MB），请上传50MB以内的文件` 
+          });
+          return;
+        }
+
         const reader = new FileReader();
+        let fileDataUrl = '';
 
         reader.onprogress = (event) => {
           if (event.lengthComputable && onProgress) {
-            onProgress(Math.round((event.loaded / event.total) * 100));
+            const readProgress = (event.loaded / event.total) * 70;
+            onProgress(Math.round(readProgress));
           }
         };
 
         reader.onload = (e) => {
-          const fileDataUrl = e.target?.result as string;
-          const isVideo = file.type.startsWith('video/');
+          fileDataUrl = e.target?.result as string;
           
-          const video: Video = {
-            id: generateId(),
-            title,
-            description,
-            category,
-            duration: 0,
-            fileName: file.name,
-            thumbnail: isVideo ? '' : fileDataUrl,
-            createdAt: new Date().toISOString(),
-            fileDataUrl,
-            fileType: file.type,
-          } as Video & { fileDataUrl: string; fileType: string };
-
-          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-          videos.push(video);
-          saveToStorage(STORAGE_KEYS.VIDEOS, videos);
-
-          if (isVideo) {
-            const videoEl = document.createElement('video');
-            videoEl.preload = 'metadata';
-            videoEl.onloadedmetadata = () => {
-              video.duration = Math.round(videoEl.duration);
-              
-              const canvas = document.createElement('canvas');
-              canvas.width = 320;
-              canvas.height = 180;
-              const ctx = canvas.getContext('2d');
-              
-              videoEl.currentTime = Math.min(1, videoEl.duration / 2);
-              videoEl.onseeked = () => {
-                if (ctx) {
-                  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-                  video.thumbnail = canvas.toDataURL('image/jpeg', 0.7);
-                }
-                const allVideos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-                const idx = allVideos.findIndex(v => v.id === video.id);
-                if (idx >= 0) {
-                  allVideos[idx] = video;
-                  saveToStorage(STORAGE_KEYS.VIDEOS, allVideos);
-                }
-              };
-            };
-            videoEl.src = fileDataUrl;
-          }
+          if (onProgress) onProgress(75);
 
           setTimeout(() => {
-            resolve({ success: true, data: video });
-          }, 300);
+            try {
+              const isVideo = file.type.startsWith('video/');
+              
+              const video: Video = {
+                id: generateId(),
+                title,
+                description,
+                category,
+                duration: 0,
+                fileName: file.name,
+                thumbnail: isVideo ? '' : fileDataUrl,
+                createdAt: new Date().toISOString(),
+                fileDataUrl,
+                fileType: file.type,
+              } as Video & { fileDataUrl: string; fileType: string };
+
+              if (onProgress) onProgress(85);
+
+              const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+              videos.push(video);
+              
+              try {
+                saveToStorage(STORAGE_KEYS.VIDEOS, videos);
+              } catch (saveError) {
+                resolve({ 
+                  success: false, 
+                  error: '存储空间不足！浏览器存储有限，请删除一些旧视频后再上传' 
+                });
+                return;
+              }
+
+              if (onProgress) onProgress(95);
+
+              if (isVideo) {
+                const videoEl = document.createElement('video');
+                videoEl.preload = 'metadata';
+                videoEl.onloadedmetadata = () => {
+                  video.duration = Math.round(videoEl.duration);
+                  
+                  try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 320;
+                    canvas.height = 180;
+                    const ctx = canvas.getContext('2d');
+                    
+                    videoEl.currentTime = Math.min(1, videoEl.duration / 2);
+                    videoEl.onseeked = () => {
+                      try {
+                        if (ctx) {
+                          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+                          video.thumbnail = canvas.toDataURL('image/jpeg', 0.7);
+                        }
+                      } catch (e) {
+                        console.warn('缩略图生成失败', e);
+                      }
+                      
+                      try {
+                        const allVideos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+                        const idx = allVideos.findIndex(v => v.id === video.id);
+                        if (idx >= 0) {
+                          allVideos[idx] = video;
+                          saveToStorage(STORAGE_KEYS.VIDEOS, allVideos);
+                        }
+                      } catch (e) {
+                        console.warn('保存缩略图失败', e);
+                      }
+                      
+                      if (onProgress) onProgress(100);
+                    };
+                  } catch (e) {
+                    console.warn('处理视频信息失败', e);
+                    if (onProgress) onProgress(100);
+                  }
+                };
+                videoEl.onerror = () => {
+                  if (onProgress) onProgress(100);
+                };
+                videoEl.src = fileDataUrl;
+              } else {
+                if (onProgress) onProgress(100);
+              }
+
+              setTimeout(() => {
+                resolve({ success: true, data: video });
+              }, 200);
+              
+            } catch (err) {
+              resolve({ 
+                success: false, 
+                error: '上传失败：' + (err as Error).message 
+              });
+            }
+          }, 100);
         };
 
         reader.onerror = () => {
-          resolve({ success: false, error: '文件读取失败' });
+          resolve({ success: false, error: '文件读取失败，请重试' });
         };
 
-        reader.readAsDataURL(file);
+        try {
+          reader.readAsDataURL(file);
+        } catch (err) {
+          resolve({ success: false, error: '文件读取失败' });
+        }
       });
     },
 
@@ -160,6 +222,7 @@ export const storageApi = {
         const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
         const filtered = videos.filter(v => v.id !== id);
         saveToStorage(STORAGE_KEYS.VIDEOS, filtered);
+        localStorage.removeItem(`sentences_${id}`);
         resolve({ success: true });
       });
     },

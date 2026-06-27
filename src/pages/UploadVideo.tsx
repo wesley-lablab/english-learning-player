@@ -31,6 +31,15 @@ export default function UploadVideo() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
+      const MAX_SIZE = 50 * 1024 * 1024;
+      if (selectedFile.size > MAX_SIZE) {
+        setError(`文件太大了（${(selectedFile.size / 1024 / 1024).toFixed(1)}MB），请上传50MB以内的文件`);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
+      setError('');
       setFile(selectedFile);
       if (!title) {
         setTitle(selectedFile.name.replace(/\.[^/.]+$/, ''));
@@ -182,7 +191,12 @@ export default function UploadVideo() {
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-200">
               <div className="flex items-center gap-3 mb-3">
                 <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
-                <span className="font-medium text-gray-700">上传中... {progress}%</span>
+                <span className="font-medium text-gray-700">
+                  {progress < 70 ? '读取文件中...' :
+                   progress < 85 ? '保存中...' :
+                   progress < 100 ? '生成缩略图...' :
+                   '即将完成...'} {progress}%
+                </span>
               </div>
               <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
                 <div
