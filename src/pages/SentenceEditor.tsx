@@ -15,9 +15,8 @@ export default function SentenceEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const timelineRef = useRef<HTMLDivElement>(null);
+  const videoElRef = useRef<HTMLVideoElement>(null);
   const recognitionRef = useRef<any>(null);
-  const finalTranscriptRef = useRef('');
-  const editingIndexRef = useRef<number | null>(null);
   
   const [video, setVideo] = useState<Video | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,17 +34,41 @@ export default function SentenceEditor() {
   const [dragEndTime, setDragEndTime] = useState(0);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcribeSource, setTranscribeSource] = useState<'video' | 'mic' | null>(null);
-  const videoPlaybackRef = useRef<HTMLVideoElement | null>(null);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
   const transcribeEndCheckRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    editingIndexRef.current = editingIndex;
-  }, [editingIndex]);
+  const addLog = (msg: string) => {
+    const time = new Date().toLocaleTimeString();
+    console.log('[语音识别]', msg);
+    setDebugLog(prev => [...prev.slice(-9), `[${time}] ${msg}`]);
+  };
 
   const isSpeechSupported = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
 
-  const startRecognition = useCallback(() => {
-    if (!isSpeechSupported) return false;
+  const startVideoTranscribe = () => {
+    if (!sentences[currentIndex]) return;
+    
+    addLog('开始视频转文字...');
+    
+    if (editingIndex === null) {
+      setEditingIndex(currentIndex);
+    }
+    setEditText('');
+    addLog('文本框已清空');
+    
+    if (!isSpeechSupported) {
+      addLog('错误：浏览器不支持语音识别');
+      alert('您的浏览器不支持语音识别，请使用 Chrome 或 Safari');
+      return;
+    }
+    
+    const videoEl = videoElRef.current;
+    if (!videoEl) {
+      addLog('错误：找不到视频元素');
+      alert('找不到视频元素');
+      return;
+    }
+    addLog('找到视频元素，时长：' + videoEl.duration + '秒');
     
     try {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -56,45 +79,184 @@ export default function SentenceEditor() {
       recognition.lang = 'en-US';
       recognition.maxAlternatives = 1;
       
-      finalTranscriptRef.current = '';
+      let finalText = '';
+      
+      recognition.onstart = () => {
+        addLog('语音识别已启动');
+      };
       
       recognition.onresult = (event: any) => {
-        let interimTranscript = '';
+        let interimText = '';
         
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const result = event.results[i];
           if (result.isFinal) {
-            finalTranscriptRef.current += result[0].transcript;
+            finalText += result[0].transcript;
+            addLog('识别到最终结果：' + result[0].transcript);
           } else {
-            interimTranscript += result[0].transcript;
+            interimText += result[0].transcript;
           }
         }
         
-        const fullText = (finalTranscriptRef.current + interimTranscript).trim();
+        const fullText = (finalText + interimText).trim();
         setEditText(fullText);
+        addLog('当前识别文本：' + fullText);
       };
       
-      recognition.onerror = () => {
+      recognition.onerror = (event: any) => {
+        addLog('识别错误：' + event.error);
         setIsTranscribing(false);
         setTranscribeSource(null);
+        if (event.error === 'not-allowed') {
+          alert('麦克风权限被拒绝，请在浏览器设置中允许麦克风权限');
+        }
       };
       
       recognition.onend = () => {
+        addLog('语音识别已结束，最终文本：' + finalText);
         setIsTranscribing(false);
         setTranscribeSource(null);
+        setEditText(finalText.trim());
+        
+        if (transcribeEndCheckRef.current) {
+          clearInterval(transcribeEndCheckRef.current);
+          transcribeEndCheckRef.current = null;
+        }
       };
       
       recognitionRef.current = recognition;
       recognition.start();
+      addLog('调用 recognition.start()');
       
-      return true;
-    } catch (e) {
-      console.error('启动语音识别失败', e);
-      return false;
+      setIsTranscribing(true);
+      setTranscribeSource('video');
+      
+      const s = sentences[currentIndex];
+      addLog(`跳转视频到 ${s.startTime}秒，播放到 ${s.endTime}秒`);
+      
+      const playVideo = () => {
+        videoEl.currentTime = s.startTime;
+        const onSeeked = () => {
+          videoEl.removeEventListener('seeked', onSeeked);
+          addLog('视频跳转完成，开始播放');
+          videoEl.play().then(() => {
+            addLog('视频播放成功');
+          }).catch((err) => {
+            addLog('视频播放失败：' + err.message);
+          });
+        };
+        videoEl.addEventListener('seeked', onSeeked);
+      };
+      
+      setTimeout(playVideo, 300);
+      
+      transcribeEndCheckRef.current = window.setInterval(() => {
+        if (!videoEl) return;
+        if (videoEl.currentTime >= s.endTime) {
+          addLog('视频播放到结束位置，停止播放和识别');
+          videoEl.pause();
+          
+          try {
+            recognition.stop();
+          } catch (e) {
+            // ignore
+          }
+          
+          if (transcribeEndCheckRef.current) {
+            clearInterval(transcribeEndCheckRef.current);
+            transcribeEndCheckRef.current = null;
+          }
+        }
+      }, 100);
+      
+    } catch (e: any) {
+      addLog('启动失败：' + e.message);
+      alert('启动语音识别失败：' + e.message);
+      setIsTranscribing(false);
+      setTranscribeSource(null);
     }
-  }, []);
+  };
 
-  const stopRecognition = useCallback(() => {
+  const startMicTranscribe = () => {
+    addLog('开始麦克风输入...');
+    
+    if (editingIndex === null) {
+      setEditingIndex(currentIndex);
+    }
+    setEditText('');
+    addLog('文本框已清空');
+    
+    if (!isSpeechSupported) {
+      addLog('错误：浏览器不支持语音识别');
+      alert('您的浏览器不支持语音识别，请使用 Chrome 或 Safari');
+      return;
+    }
+    
+    try {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+      recognition.maxAlternatives = 1;
+      
+      let finalText = '';
+      
+      recognition.onstart = () => {
+        addLog('语音识别已启动');
+      };
+      
+      recognition.onresult = (event: any) => {
+        let interimText = '';
+        
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          if (result.isFinal) {
+            finalText += result[0].transcript;
+            addLog('识别到最终结果：' + result[0].transcript);
+          } else {
+            interimText += result[0].transcript;
+          }
+        }
+        
+        const fullText = (finalText + interimText).trim();
+        setEditText(fullText);
+      };
+      
+      recognition.onerror = (event: any) => {
+        addLog('识别错误：' + event.error);
+        setIsTranscribing(false);
+        setTranscribeSource(null);
+        if (event.error === 'not-allowed') {
+          alert('麦克风权限被拒绝，请在浏览器设置中允许麦克风权限');
+        }
+      };
+      
+      recognition.onend = () => {
+        addLog('语音识别已结束，最终文本：' + finalText);
+        setIsTranscribing(false);
+        setTranscribeSource(null);
+        setEditText(finalText.trim());
+      };
+      
+      recognitionRef.current = recognition;
+      recognition.start();
+      addLog('调用 recognition.start()');
+      
+      setIsTranscribing(true);
+      setTranscribeSource('mic');
+      
+    } catch (e: any) {
+      addLog('启动失败：' + e.message);
+      alert('启动语音识别失败：' + e.message);
+      setIsTranscribing(false);
+      setTranscribeSource(null);
+    }
+  };
+
+  const stopTranscribe = () => {
+    addLog('手动停止识别');
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -103,7 +265,19 @@ export default function SentenceEditor() {
       }
       recognitionRef.current = null;
     }
-  }, []);
+    
+    if (videoElRef.current && transcribeSource === 'video') {
+      videoElRef.current.pause();
+    }
+    
+    if (transcribeEndCheckRef.current) {
+      clearInterval(transcribeEndCheckRef.current);
+      transcribeEndCheckRef.current = null;
+    }
+    
+    setIsTranscribing(false);
+    setTranscribeSource(null);
+  };
 
   const duration = video?.duration || 0;
 
@@ -139,7 +313,7 @@ export default function SentenceEditor() {
   };
 
   const seekTo = useCallback((time: number) => {
-    const video = document.querySelector('video');
+    const video = videoElRef.current;
     if (video) {
       video.currentTime = Math.max(0, Math.min(time, duration));
       setCurrentTime(Math.max(0, Math.min(time, duration)));
@@ -147,14 +321,14 @@ export default function SentenceEditor() {
   }, [duration]);
 
   const handleTimeUpdate = useCallback(() => {
-    const video = document.querySelector('video');
+    const video = videoElRef.current;
     if (video) {
       setCurrentTime(video.currentTime);
     }
   }, []);
 
   const playSentence = useCallback((index: number) => {
-    const video = document.querySelector('video');
+    const video = videoElRef.current;
     if (!video || !sentences[index]) return;
     
     video.currentTime = sentences[index].startTime;
@@ -164,7 +338,7 @@ export default function SentenceEditor() {
     
     const s = sentences[index];
     const checkEnd = setInterval(() => {
-      const v = document.querySelector('video');
+      const v = videoElRef.current;
       if (v && v.currentTime >= s.endTime) {
         v.pause();
         setIsPlaying(false);
@@ -174,7 +348,7 @@ export default function SentenceEditor() {
   }, [sentences]);
 
   const togglePlay = () => {
-    const video = document.querySelector('video');
+    const video = videoElRef.current;
     if (!video) return;
     if (video.paused) {
       video.play();
@@ -277,97 +451,6 @@ export default function SentenceEditor() {
     setEditingIndex(index);
     setEditText(sentences[index].text);
     setCurrentIndex(index);
-  };
-
-  const stopTranscribe = useCallback(() => {
-    stopRecognition();
-    setIsTranscribing(false);
-    setTranscribeSource(null);
-    
-    if (transcribeEndCheckRef.current) {
-      clearInterval(transcribeEndCheckRef.current);
-      transcribeEndCheckRef.current = null;
-    }
-    
-    if (videoPlaybackRef.current) {
-      videoPlaybackRef.current.pause();
-      videoPlaybackRef.current = null;
-    }
-  }, [stopRecognition]);
-
-  const startMicTranscribe = () => {
-    if (editingIndex === null) {
-      setEditingIndex(currentIndex);
-      editingIndexRef.current = currentIndex;
-    }
-    setEditText('');
-    finalTranscriptRef.current = '';
-    
-    const started = startRecognition();
-    if (started) {
-      setIsTranscribing(true);
-      setTranscribeSource('mic');
-    } else {
-      alert('无法启动语音识别，请检查浏览器设置');
-    }
-  };
-
-  const startVideoTranscribe = async () => {
-    if (!sentences[currentIndex]) return;
-    
-    if (editingIndex === null) {
-      setEditingIndex(currentIndex);
-      editingIndexRef.current = currentIndex;
-    }
-    
-    setEditText('');
-    finalTranscriptRef.current = '';
-    
-    const videos = document.querySelectorAll('video');
-    const videoEl = videos[0];
-    if (!videoEl) {
-      alert('找不到视频元素');
-      return;
-    }
-    
-    const started = startRecognition();
-    if (!started) {
-      alert('无法启动语音识别，请检查麦克风权限和浏览器设置');
-      return;
-    }
-    
-    setIsTranscribing(true);
-    setTranscribeSource('video');
-    videoPlaybackRef.current = videoEl;
-    
-    try {
-      const s = sentences[currentIndex];
-      
-      const onSeeked = () => {
-        videoEl.removeEventListener('seeked', onSeeked);
-        videoEl.play().catch((err) => {
-          console.error('播放失败', err);
-          stopTranscribe();
-        });
-      };
-      videoEl.addEventListener('seeked', onSeeked);
-      videoEl.currentTime = s.startTime;
-      
-      transcribeEndCheckRef.current = window.setInterval(() => {
-        if (!videoPlaybackRef.current) return;
-        if (videoPlaybackRef.current.currentTime >= sentences[currentIndex].endTime) {
-          videoPlaybackRef.current.pause();
-          setTimeout(() => {
-            stopTranscribe();
-          }, 1500);
-        }
-      }, 100);
-      
-    } catch (e) {
-      console.error('视频转文字失败', e);
-      stopTranscribe();
-      alert('转文字失败：' + (e as Error).message);
-    }
   };
 
   const saveEditText = () => {
@@ -601,6 +684,7 @@ export default function SentenceEditor() {
             <div className="flex-1">
               <div className="relative bg-black rounded-xl overflow-hidden aspect-video">
                 <video
+                  ref={videoElRef}
                   src={video.fileDataUrl}
                   className="w-full h-full object-contain"
                   controls
@@ -1015,6 +1099,19 @@ export default function SentenceEditor() {
                       <br />
                       💡 <strong>麦克风输入：</strong>自己对着麦克风读句子，系统转成文字
                     </p>
+
+                    {debugLog.length > 0 && (
+                      <details className="mt-3">
+                        <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                          🐛 调试日志（点击展开）
+                        </summary>
+                        <div className="mt-2 p-2 bg-gray-900 text-green-400 rounded-lg text-xs font-mono max-h-40 overflow-y-auto">
+                          {debugLog.map((log, i) => (
+                            <div key={i} className="leading-relaxed">{log}</div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </div>
                 ) : (
                   <div className="bg-gray-50 rounded-xl p-4">
