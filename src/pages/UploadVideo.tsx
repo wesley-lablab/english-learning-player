@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Upload, ArrowLeft, FileVideo, CheckCircle, X, Loader2 } from 'lucide-react';
 import type { Category } from '../types';
-import { api } from '../utils/api';
+import { storageApi } from '../utils/storage';
 
 export default function UploadVideo() {
   const navigate = useNavigate();
@@ -22,9 +22,9 @@ export default function UploadVideo() {
   }, []);
 
   const loadCategories = async () => {
-    const res = await api.categories.list();
+    const res = await storageApi.categories.list();
     if (res.data) {
-      setCategories(res.data.filter(c => c.id !== 'all'));
+      setCategories(res.data);
     }
   };
 
@@ -58,16 +58,15 @@ export default function UploadVideo() {
     setProgress(0);
 
     try {
-      const formData = new FormData();
-      formData.append('video', file);
-      formData.append('title', title);
-      formData.append('description', description);
-      formData.append('category', category);
-      formData.append('duration', '0');
-
-      const result = await api.videos.upload(formData, (percent) => {
-        setProgress(percent);
-      });
+      const result = await storageApi.videos.upload(
+        file,
+        title,
+        description,
+        category,
+        (percent) => {
+          setProgress(percent);
+        }
+      );
 
       if (result.success) {
         setSuccess(true);

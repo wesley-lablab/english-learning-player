@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { HashRouter as Router, Routes, Route } from "react-router-dom";
 import RoleSelect from "@/pages/RoleSelect";
 import KidVideoList from "@/pages/KidVideoList";
 import VideoPlay from "@/pages/VideoPlay";

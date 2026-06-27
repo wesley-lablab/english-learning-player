@@ -17,14 +17,22 @@ export default function VideoCard({ video, onClick }: VideoCardProps) {
       className="group relative bg-white rounded-3xl overflow-hidden shadow-lg cursor-pointer transform transition-all duration-300 hover:scale-105 hover:shadow-2xl"
     >
       <div className="relative aspect-video bg-gradient-to-br from-orange-100 to-yellow-100 overflow-hidden">
-        <div 
-          className="absolute inset-0 flex items-center justify-center"
-          style={{ backgroundColor: `${categoryColor}20` }}
-        >
-          <span className="text-7xl transform group-hover:scale-125 transition-transform duration-300">
-            {categoryEmoji}
-          </span>
-        </div>
+        {video.thumbnail ? (
+          <img 
+            src={video.thumbnail} 
+            alt={video.title}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        ) : (
+          <div 
+            className="absolute inset-0 flex items-center justify-center"
+            style={{ backgroundColor: `${categoryColor}20` }}
+          >
+            <span className="text-7xl transform group-hover:scale-125 transition-transform duration-300">
+              {categoryEmoji}
+            </span>
+          </div>
+        )}
         
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-300 flex items-center justify-center">
           <div className="w-20 h-20 bg-white/0 group-hover:bg-white/90 rounded-full flex items-center justify-center transform scale-75 group-hover:scale-100 transition-all duration-300 opacity-0 group-hover:opacity-100">

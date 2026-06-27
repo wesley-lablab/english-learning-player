@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Settings, Star, Sparkles } from 'lucide-react';
 import type { Video, Category } from '../types';
-import { api } from '../utils/api';
+import { storageApi } from '../utils/storage';
 import VideoCard from '../components/VideoCard';
 import CategoryNav from '../components/CategoryNav';
 import { useAppStore } from '../store/useAppStore';
@@ -25,8 +25,8 @@ export default function KidVideoList() {
   const loadData = async () => {
     try {
       const [catRes, settingsRes] = await Promise.all([
-        api.categories.list(),
-        api.auth.getSettings(),
+        storageApi.categories.list(),
+        storageApi.auth.getSettings(),
       ]);
       if (catRes.data) setCategories(catRes.data);
       if (settingsRes.data) {
@@ -40,7 +40,7 @@ export default function KidVideoList() {
   const loadVideos = async () => {
     setLoading(true);
     try {
-      const res = await api.videos.list(selectedCategory === 'all' ? undefined : selectedCategory);
+      const res = await storageApi.videos.list(selectedCategory === 'all' ? undefined : selectedCategory);
       if (res.data) setVideos(res.data);
     } catch (e) {
       console.error(e);

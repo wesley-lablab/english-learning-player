@@ -7,6 +7,8 @@ export interface Video {
   fileName: string;
   thumbnail: string;
   createdAt: string;
+  fileDataUrl?: string;
+  fileType?: string;
 }
 
 export interface Category {

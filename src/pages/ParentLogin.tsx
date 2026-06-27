@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Lock, LogIn } from 'lucide-react';
-import { api } from '../utils/api';
+import { storageApi } from '../utils/storage';
 import { useAppStore } from '../store/useAppStore';
 
 export default function ParentLogin() {
@@ -17,7 +17,7 @@ export default function ParentLogin() {
     setLoading(true);
 
     try {
-      const res = await api.auth.login(password);
+      const res = await storageApi.auth.login(password);
       if (res.success && res.data?.token) {
         localStorage.setItem('admin_token', res.data.token);
         setIsAdmin(true);

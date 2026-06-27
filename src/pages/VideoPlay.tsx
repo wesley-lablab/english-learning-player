@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import type { Video, PlaybackRate } from '../types';
-import { api } from '../utils/api';
-import { getVideoUrl } from '../utils';
+import { storageApi } from '../utils/storage';
+
 import VideoPlayer from '../components/VideoPlayer';
 import { useAppStore } from '../store/useAppStore';
 
@@ -24,7 +24,7 @@ export default function VideoPlay() {
     if (!id) return;
     setLoading(true);
     try {
-      const res = await api.videos.get(parseInt(id, 10));
+      const res = await storageApi.videos.get(parseInt(id, 10));
       if (res.data) {
         setVideo(res.data);
         startTimeRef.current = Date.now();
@@ -44,7 +44,7 @@ export default function VideoPlay() {
     if (!video || watchedTimeRef.current < 5) return;
     
     try {
-      await api.records.add({
+      await storageApi.records.add({
         videoId: video.id,
         videoTitle: video.title,
         childName: settings.childName,
@@ -131,7 +131,7 @@ export default function VideoPlay() {
         </div>
 
         <VideoPlayer
-          videoUrl={getVideoUrl(video.fileName)}
+          videoUrl={video.fileDataUrl || ''}
           title={video.title}
           playbackRate={playbackRate}
           onRateChange={handleRateChange}

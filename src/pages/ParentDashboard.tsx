@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Plus, Trash2, Video as VideoIcon, BarChart3, Clock, LogOut, Upload, ArrowLeft } from 'lucide-react';
 import type { Video, StudyStats, StudyRecord } from '../types';
-import { api } from '../utils/api';
+import { storageApi } from '../utils/storage';
 import { formatDuration, formatDate, getCategoryEmoji } from '../utils';
 import { useAppStore } from '../store/useAppStore';
 
@@ -26,7 +26,7 @@ export default function ParentDashboard() {
       navigate('/parent/login');
       return;
     }
-    const res = await api.auth.status();
+    const res = await storageApi.auth.status();
     if (!res.data?.isLoggedIn) {
       navigate('/parent/login');
     }
@@ -36,9 +36,9 @@ export default function ParentDashboard() {
     setLoading(true);
     try {
       const [videosRes, statsRes, recordsRes] = await Promise.all([
-        api.videos.list(),
-        api.records.stats(),
-        api.records.list(),
+        storageApi.videos.list(),
+        storageApi.records.stats(),
+        storageApi.records.list(),
       ]);
       if (videosRes.data) setVideos(videosRes.data);
       if (statsRes.data) setStats(statsRes.data);
@@ -52,7 +52,7 @@ export default function ParentDashboard() {
   const handleDelete = async (id: number, title: string) => {
     if (!confirm(`确定要删除视频「${title}」吗？`)) return;
     try {
-      const res = await api.videos.delete(id);
+      const res = await storageApi.videos.delete(id);
       if (res.success) {
         setVideos(videos.filter(v => v.id !== id));
       }
