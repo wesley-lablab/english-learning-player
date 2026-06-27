@@ -1,0 +1,65 @@
+{
+  "videos": [
+    {
+      "id": 1,
+      "title": "第一单元：字母学习",
+      "description": "跟着视频学习26个英文字母的正确发音",
+      "category": "course",
+      "duration": 180,
+      "fileName": "sample1.mp4",
+      "thumbnail": "",
+      "createdAt": "2026-06-27T05:44:56.150Z"
+    },
+    {
+      "id": 2,
+      "title": "第二单元：日常对话",
+      "description": "学习早上打招呼、自我介绍等日常用语",
+      "category": "course",
+      "duration": 240,
+      "fileName": "sample2.mp4",
+      "thumbnail": "",
+      "createdAt": "2026-06-27T05:44:56.152Z"
+    },
+    {
+      "id": 3,
+      "title": "拓展：英语儿歌欣赏",
+      "description": "好听的英语儿歌，培养英语语感",
+      "category": "extension",
+      "duration": 200,
+      "fileName": "sample3.mp4",
+      "thumbnail": "",
+      "createdAt": "2026-06-27T05:44:56.152Z"
+    }
+  ],
+  "categories": [
+    {
+      "id": "all",
+      "name": "全部",
+      "icon": "🌟",
+      "color": "#FF9F43",
+      "sortOrder": 0
+    },
+    {
+      "id": "course",
+      "name": "课程",
+      "icon": "📘",
+      "color": "#54A0FF",
+      "sortOrder": 1
+    },
+    {
+      "id": "extension",
+      "name": "课程拓展",
+      "icon": "🚀",
+      "color": "#FF6B6B",
+      "sortOrder": 2
+    }
+  ],
+  "studyRecords": [],
+  "settings": {
+    "parentPassword": "$2b$10$9y8Zsrs0VcR4ooSMe7qnGewRwZ2X5S19nOoOUUkr61ATVEVu5gu3S",
+    "childName": "小朋友",
+    "childAvatar": "🧒"
+  },
+  "nextVideoId": 7,
+  "nextRecordId": 1
+}
