@@ -519,7 +519,30 @@ export default function PracticeSession() {
                     {formatTime(currentSentence.startTime)} - {formatTime(currentSentence.endTime)}
                   </p>
                 </div>
-                <div className="flex-1" />
+              </div>
+
+              {/* 视频播放器 - 可见！ */}
+              <div className="relative rounded-2xl overflow-hidden bg-black mb-4 shadow-inner">
+                <video
+                  ref={visibleVideoRef}
+                  src={video.fileDataUrl}
+                  className="w-full h-auto block"
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  onEnded={() => setIsPlaying(false)}
+                  onTimeUpdate={() => {
+                    if (visibleVideoRef.current && currentSentence) {
+                      if (visibleVideoRef.current.currentTime >= currentSentence.endTime) {
+                        visibleVideoRef.current.pause();
+                        handleSentenceEnded();
+                      }
+                    }
+                  }}
+                  playsInline
+                  controls={false}
+                />
+                
+                {/* 循环按钮 - 直接放在视频右下角 */}
                 <button
                   onClick={() => {
                     const modes: ('none' | 'single' | 'all')[] = ['none', 'single', 'all'];
@@ -528,22 +551,34 @@ export default function PracticeSession() {
                     setLoopMode(nextMode);
                     loopModeRef.current = nextMode;
                   }}
-                  className={`px-4 py-2 rounded-2xl font-bold text-base flex items-center gap-1.5 transition-all shadow-sm border-2 ${
+                  className={`absolute bottom-3 right-3 px-3 py-1.5 rounded-full font-bold text-sm flex items-center gap-1 shadow-lg border-2 transition-all ${
                     loopMode === 'none'
-                      ? 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
+                      ? 'bg-black/60 text-white border-white/30'
                       : loopMode === 'single'
-                      ? 'bg-orange-100 text-orange-600 border-orange-300 hover:bg-orange-200'
-                      : 'bg-emerald-100 text-emerald-600 border-emerald-300 hover:bg-emerald-200'
+                      ? 'bg-orange-500 text-white border-orange-300'
+                      : 'bg-emerald-500 text-white border-emerald-300'
                   }`}
                 >
                   {loopMode === 'single' ? (
-                    <Repeat1 className="w-5 h-5" />
+                    <Repeat1 className="w-4 h-4" />
                   ) : (
-                    <Repeat className="w-5 h-5" />
+                    <Repeat className="w-4 h-4" />
                   )}
                   {loopMode === 'none' ? '循环' :
                    loopMode === 'single' ? '单曲' : '全部'}
                 </button>
+                
+                {/* 大播放按钮覆盖层 */}
+                {!isPlaying && (
+                  <button
+                    onClick={() => playSentence()}
+                    className="absolute inset-0 flex items-center justify-center bg-black/20 active:bg-black/30 transition-colors"
+                  >
+                    <div className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center shadow-xl">
+                      <Play className="w-8 h-8 text-orange-500 ml-1" />
+                    </div>
+                  </button>
+                )}
               </div>
 
               <p className="text-xl font-bold text-gray-800 leading-relaxed mb-4 px-2">
@@ -574,7 +609,7 @@ export default function PracticeSession() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-center gap-3 mb-4">
+              <div className="flex items-center justify-center gap-3">
                 <button
                   onClick={handlePrevious}
                   disabled={currentIndex === 0}
@@ -600,24 +635,6 @@ export default function PracticeSession() {
                   <ChevronRight className="w-6 h-6 text-gray-600" />
                 </button>
               </div>
-
-              <video
-                ref={visibleVideoRef}
-                src={video.fileDataUrl}
-                className="hidden"
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                onEnded={() => setIsPlaying(false)}
-                onTimeUpdate={() => {
-                  if (visibleVideoRef.current && currentSentence) {
-                    if (visibleVideoRef.current.currentTime >= currentSentence.endTime) {
-                      visibleVideoRef.current.pause();
-                      handleSentenceEnded();
-                    }
-                  }
-                }}
-                playsInline
-              />
             </div>
 
             {/* VS 分隔 */}

@@ -5,6 +5,7 @@ import {
   deleteVideoFromIndexedDB,
   checkStorageAvailable,
 } from './indexedDB';
+import { uploadToGitHub, addVideoToPlaylist, loadPlaylistFromGitHub } from './githubUpload';
 
 const STORAGE_KEYS = {
   VIDEOS: 'elp_videos',
@@ -27,46 +28,6 @@ const DEFAULT_SETTINGS: Settings = {
 
 const DEFAULT_PASSWORD = '123456';
 
-interface PresetVideo extends Video {
-  sentences?: Sentence[];
-}
-
-interface PresetPlaylist {
-  videos: PresetVideo[];
-}
-
-let presetVideosCache: PresetVideo[] | null = null;
-
-async function loadPresetVideos(): Promise<PresetVideo[]> {
-  if (presetVideosCache) {
-    return presetVideosCache;
-  }
-  
-  try {
-    const baseUrl = import.meta.env.BASE_URL || '/';
-    const response = await fetch(`${baseUrl}videos/playlist.json?t=${Date.now()}`);
-    if (!response.ok) {
-      presetVideosCache = [];
-      return [];
-    }
-    const data: PresetPlaylist = await response.json();
-    
-    const videosWithUrls = data.videos.map(v => ({
-      ...v,
-      fileDataUrl: `${baseUrl}videos/${v.fileName}`,
-      thumbnail: v.thumbnail ? `${baseUrl}videos/${v.thumbnail}` : '',
-      isPreset: true,
-    }));
-    
-    presetVideosCache = videosWithUrls;
-    return videosWithUrls;
-  } catch (e) {
-    console.warn('加载预置视频失败', e);
-    presetVideosCache = [];
-    return [];
-  }
-}
-
 function getFromStorage<T>(key: string, defaultValue: T): T {
   try {
     const data = localStorage.getItem(key);
@@ -84,31 +45,16 @@ function generateId(): number {
   return Date.now() + Math.floor(Math.random() * 1000);
 }
 
-function getLocalVideos(): Video[] {
-  const localVideos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-  return localVideos.filter((video) => !STATIC_VIDEOS.some((staticVideo) => staticVideo.id === video.id));
-}
-
-function getAllVideos(): Video[] {
-  return [...STATIC_VIDEOS, ...getLocalVideos()];
-}
-
 export const storageApi = {
   videos: {
-<<<<<<< Updated upstream
-    list: (category?: string): Promise<{ success: boolean; data: Video[] }> => {
-      return new Promise((resolve) => {
-        const videos = getAllVideos();
-        const filtered = category && category !== 'all'
-          ? videos.filter(v => v.category === category)
-          : videos;
-        resolve({ success: true, data: filtered.sort((a, b) =>
-=======
     list: async (category?: string): Promise<{ success: boolean; data: Video[] }> => {
-      const localVideos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-      const presetVideos = await loadPresetVideos();
+      // 从 GitHub 加载云端视频
+      const cloudVideos = await loadPlaylistFromGitHub();
       
-      const allVideos = [...presetVideos, ...localVideos];
+      // 从本地加载
+      const localVideos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+      
+      const allVideos = [...cloudVideos, ...localVideos];
       const filtered = category && category !== 'all'
         ? allVideos.filter(v => v.category === category)
         : allVideos;
@@ -116,7 +62,6 @@ export const storageApi = {
       return {
         success: true,
         data: filtered.sort((a, b) => 
->>>>>>> Stashed changes
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         ),
       };
@@ -133,137 +78,107 @@ export const storageApi = {
         try {
           if (onProgress) onProgress(5);
 
-          const storageCheck = await checkStorageAvailable(100);
-          if (!storageCheck.available) {
+          // 上传视频到 GitHub
+          if (onProgress) onProgress(10);
+          const uploadResult = await uploadToGitHub(file);
+          
+          if (!uploadResult.success || !uploadResult.url) {
             resolve({
               success: false,
-              error: `存储空间不足！${storageCheck.message}。请先删除一些旧视频。`,
+              error: uploadResult.error || '上传到云端失败',
             });
             return;
           }
+          
+          if (onProgress) onProgress(50);
 
-          if (onProgress) onProgress(10);
-
-          const isVideo = file.type.startsWith('video/');
           const videoId = generateId();
-
           const video: Video = {
             id: videoId,
             title,
             description,
             category,
             duration: 0,
-            fileName: file.name,
+            fileName: uploadResult.fileName || file.name,
             thumbnail: '',
             createdAt: new Date().toISOString(),
-            fileDataUrl: '',
+            fileDataUrl: uploadResult.url,
             fileType: file.type,
+            isCloudHosted: true,
           };
 
-          if (onProgress) onProgress(30);
-
-          let thumbnailBlob: Blob | undefined;
-
-          if (isVideo) {
+          // 生成缩略图
+          let thumbFile: File | undefined;
+          if (file.type.startsWith('video/')) {
             const videoEl = document.createElement('video');
             videoEl.preload = 'auto';
             videoEl.muted = true;
             videoEl.playsInline = true;
-
-            let resolved = false;
-            const safeResolve = () => {
-              if (!resolved) {
-                resolved = true;
-              }
-            };
-
+            
             await new Promise<void>((resolveVideo) => {
-              const finish = () => {
-                safeResolve();
-                resolveVideo();
-              };
-
-              const timeout = setTimeout(finish, 8000);
-
+              const timeout = setTimeout(resolveVideo, 8000);
+              
               videoEl.onloadedmetadata = () => {
-                if (resolved) return;
                 video.duration = Math.round(videoEl.duration);
-
                 const canvas = document.createElement('canvas');
                 canvas.width = 320;
                 canvas.height = 180;
                 const ctx = canvas.getContext('2d');
-
-                try {
+                
+                if (ctx) {
                   const seekTime = Math.min(1, videoEl.duration / 2);
                   videoEl.currentTime = seekTime;
-
+                  
                   videoEl.onseeked = () => {
-                    if (resolved) return;
                     try {
-                      if (ctx) {
-                        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-                        canvas.toBlob((blob) => {
-                          thumbnailBlob = blob || undefined;
-                          clearTimeout(timeout);
-                          finish();
-                        }, 'image/jpeg', 0.7);
-                      } else {
+                      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+                      canvas.toBlob((blob) => {
+                        if (blob) {
+                          thumbFile = new File([blob], `thumb_${videoId}.jpg`, { type: 'image/jpeg' });
+                        }
                         clearTimeout(timeout);
-                        finish();
-                      }
+                        resolveVideo();
+                      }, 'image/jpeg', 0.7);
                     } catch {
                       clearTimeout(timeout);
-                      finish();
+                      resolveVideo();
                     }
                   };
-
-                  videoEl.onerror = () => {
-                    clearTimeout(timeout);
-                    finish();
-                  };
-                } catch {
+                } else {
                   clearTimeout(timeout);
-                  finish();
+                  resolveVideo();
                 }
               };
-
+              
               videoEl.onerror = () => {
                 clearTimeout(timeout);
-                finish();
+                resolveVideo();
               };
-
-              const objectUrl = URL.createObjectURL(file);
-              videoEl.src = objectUrl;
+              
+              videoEl.src = uploadResult.url!;
               videoEl.load();
             });
           }
-
-          if (onProgress) onProgress(60);
-
-          try {
-            await saveVideoToIndexedDB({
-              id: videoId,
-              file: file,
-              thumbnail: thumbnailBlob,
-            });
-          } catch {
-            resolve({
-              success: false,
-              error: '存储空间不足，无法保存视频！请删除一些旧视频后再试。',
-            });
-            return;
+          
+          if (onProgress) onProgress(70);
+          
+          // 上传缩略图
+          if (thumbFile) {
+            const thumbUpload = await uploadToGitHub(thumbFile);
+            if (thumbUpload.success && thumbUpload.url) {
+              video.thumbnail = thumbUpload.url;
+            }
           }
 
-          if (onProgress) onProgress(90);
+          if (onProgress) onProgress(85);
 
-          if (thumbnailBlob) {
-            video.thumbnail = URL.createObjectURL(thumbnailBlob);
-          } else if (!isVideo) {
-            video.thumbnail = URL.createObjectURL(file);
-          }
+          // 保存到 GitHub playlist（多端共享）
+          const playlistOk = await addVideoToPlaylist(video, []);
+          
+          if (onProgress) onProgress(95);
 
-          const videos = getLocalVideos();
+          // 也保存到本地
+          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
           videos.push(video);
           saveToStorage(STORAGE_KEYS.VIDEOS, videos);
 
@@ -282,29 +197,27 @@ export const storageApi = {
     get: (id: number): Promise<{ success: boolean; data?: Video; error?: string }> => {
       return new Promise(async (resolve) => {
         try {
-<<<<<<< Updated upstream
-          const staticVideo = STATIC_VIDEOS.find(v => v.id === id);
-          if (staticVideo) {
-            resolve({ success: true, data: staticVideo });
-            return;
-          }
-
-          const videos = getLocalVideos();
-=======
-          const presetVideos = await loadPresetVideos();
-          const presetVideo = presetVideos.find(v => v.id === id);
+          // 先看云端
+          const cloudVideos = await loadPlaylistFromGitHub();
+          const cloudVideo = cloudVideos.find(v => v.id === id);
           
-          if (presetVideo) {
-            resolve({ success: true, data: presetVideo });
+          if (cloudVideo) {
+            resolve({ success: true, data: cloudVideo });
             return;
           }
           
+          // 再看本地
           const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
->>>>>>> Stashed changes
           const video = videos.find(v => v.id === id);
-
+          
           if (!video) {
             resolve({ success: false, error: '视频不存在' });
+            return;
+          }
+
+          // 云端视频直接用 fileDataUrl
+          if (video.fileDataUrl && video.fileDataUrl.startsWith('http')) {
+            resolve({ success: true, data: video });
             return;
           }
 
@@ -319,20 +232,16 @@ export const storageApi = {
           }
 
           resolve({ success: true, data: video });
-        } catch {
+        } catch (err) {
           resolve({ success: false, error: '读取失败' });
         }
       });
     },
 
     update: (id: number, data: Partial<Video>): Promise<{ success: boolean; data?: Video; error?: string }> => {
-      return new Promise((resolve) => {
-        if (STATIC_VIDEOS.some(v => v.id === id)) {
-          resolve({ success: false, error: '固定视频请在 src/data/staticVideos.ts 中修改' });
-          return;
-        }
-
-        const videos = getLocalVideos();
+      return new Promise(async (resolve) => {
+        // 更新本地
+        const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
         const index = videos.findIndex(v => v.id === id);
         if (index >= 0) {
           videos[index] = { ...videos[index], ...data };
@@ -347,24 +256,19 @@ export const storageApi = {
     delete: (id: number): Promise<{ success: boolean; error?: string }> => {
       return new Promise(async (resolve) => {
         try {
-          if (STATIC_VIDEOS.some(v => v.id === id)) {
-            resolve({ success: false, error: '固定视频不能在后台删除，请从 GitHub 的 public/videos 和 staticVideos.ts 中移除' });
-            return;
-          }
-
-          const videos = getLocalVideos();
+          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
           const filtered = videos.filter(v => v.id !== id);
           saveToStorage(STORAGE_KEYS.VIDEOS, filtered);
           localStorage.removeItem(`sentences_${id}`);
-
+          
           try {
             await deleteVideoFromIndexedDB(id);
           } catch (e) {
             console.warn('删除IndexedDB中的视频失败', e);
           }
-
+          
           resolve({ success: true });
-        } catch {
+        } catch (e) {
           resolve({ success: false, error: '删除失败' });
         }
       });
@@ -372,23 +276,22 @@ export const storageApi = {
 
     getSentences: async (videoId: number): Promise<{ success: boolean; data: Sentence[]; error?: string }> => {
       try {
-        const presetVideos = await loadPresetVideos();
-        const presetVideo = presetVideos.find(v => v.id === videoId);
+        // 先看云端
+        const cloudVideos = await loadPlaylistFromGitHub();
+        const cloudVideo = cloudVideos.find(v => v.id === videoId);
         
-        if (presetVideo && presetVideo.sentences && presetVideo.sentences.length > 0) {
-          const saved = localStorage.getItem(`sentences_${videoId}`);
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed.length > 0) {
-              return { success: true, data: parsed };
-            }
-          }
-          return { success: true, data: presetVideo.sentences };
-        }
-        
+        // 本地修改过的优先
         const saved = localStorage.getItem(`sentences_${videoId}`);
         if (saved) {
-          return { success: true, data: JSON.parse(saved) };
+          const parsed = JSON.parse(saved);
+          if (parsed.length > 0) {
+            return { success: true, data: parsed };
+          }
+        }
+        
+        // 云端有句子的话用云端
+        if (cloudVideo && cloudVideo.sentences && cloudVideo.sentences.length > 0) {
+          return { success: true, data: cloudVideo.sentences };
         }
         
         return { success: true, data: [] };
@@ -398,9 +301,17 @@ export const storageApi = {
     },
 
     saveSentences: (videoId: number, sentences: Sentence[]): Promise<{ success: boolean; error?: string }> => {
-      return new Promise((resolve) => {
+      return new Promise(async (resolve) => {
         try {
           localStorage.setItem(`sentences_${videoId}`, JSON.stringify(sentences));
+          
+          // 同时更新云端 playlist（多端同步）
+          const cloudVideos = await loadPlaylistFromGitHub();
+          const cloudVideo = cloudVideos.find(v => v.id === videoId);
+          if (cloudVideo) {
+            await addVideoToPlaylist(cloudVideo, sentences);
+          }
+          
           resolve({ success: true });
         } catch (e) {
           resolve({ success: false, error: '保存失败' });
@@ -459,7 +370,7 @@ export const storageApi = {
         const records = getFromStorage<StudyRecord[]>(STORAGE_KEYS.RECORDS, []);
         resolve({
           success: true,
-          data: records.sort((a, b) =>
+          data: records.sort((a, b) => 
             new Date(b.watchedAt).getTime() - new Date(a.watchedAt).getTime()
           ),
         });
@@ -488,7 +399,7 @@ export const storageApi = {
 
     stats: (): Promise<{ success: boolean; data: StudyStats }> => {
       return new Promise((resolve) => {
-        const videos = getAllVideos();
+        const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
         const records = getFromStorage<StudyRecord[]>(STORAGE_KEYS.RECORDS, []);
         const totalDuration = records.reduce((sum, r) => sum + r.watchedDuration, 0);
         resolve({
