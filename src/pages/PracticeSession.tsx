@@ -39,6 +39,7 @@ export default function PracticeSession() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const sentenceEndedRef = useRef(false);
+  const seekingRef = useRef(false);
   const [videoError, setVideoError] = useState(false);
   const [videoLoading, setVideoLoading] = useState(true);
 
@@ -135,13 +136,29 @@ export default function PracticeSession() {
     }
     
     sentenceEndedRef.current = false;
+    seekingRef.current = true;
     
     const videoEl = videoRef.current;
     videoEl.currentTime = sentence.startTime;
     videoEl.muted = false;
-    videoEl.play();
     
-    setIsPlaying(true);
+    // 等待 seeked 事件触发后再播放
+    const handleSeeked = () => {
+      seekingRef.current = false;
+      videoEl.removeEventListener('seeked', handleSeeked);
+      videoEl.play().catch(e => console.warn('播放失败:', e));
+      setIsPlaying(true);
+    };
+    
+    videoEl.addEventListener('seeked', handleSeeked);
+    
+    // 如果视频已经在这个位置，直接播放
+    if (Math.abs(videoEl.currentTime - sentence.startTime) < 0.1) {
+      seekingRef.current = false;
+      videoEl.removeEventListener('seeked', handleSeeked);
+      videoEl.play().catch(e => console.warn('播放失败:', e));
+      setIsPlaying(true);
+    }
   }, [currentIndex, sentences]);
 
   const handleSentenceEnded = useCallback(() => {
@@ -150,16 +167,46 @@ export default function PracticeSession() {
     
     if (mode === 'single') {
       if (videoEl && currentSentence) {
+        sentenceEndedRef.current = false;
+        seekingRef.current = true;
         videoEl.currentTime = currentSentence.startTime;
-        videoEl.play();
+        
+        const handleSeeked = () => {
+          seekingRef.current = false;
+          videoEl.removeEventListener('seeked', handleSeeked);
+          videoEl.play().catch(e => console.warn('播放失败:', e));
+        };
+        
+        videoEl.addEventListener('seeked', handleSeeked);
+        
+        if (Math.abs(videoEl.currentTime - currentSentence.startTime) < 0.1) {
+          seekingRef.current = false;
+          videoEl.removeEventListener('seeked', handleSeeked);
+          videoEl.play().catch(e => console.warn('播放失败:', e));
+        }
       }
     } else if (mode === 'all') {
       const nextIndex = currentIndex < sentences.length - 1 ? currentIndex + 1 : 0;
       const nextSentence = sentences[nextIndex];
       if (videoEl && nextSentence) {
         setCurrentIndex(nextIndex);
+        sentenceEndedRef.current = false;
+        seekingRef.current = true;
         videoEl.currentTime = nextSentence.startTime;
-        videoEl.play();
+        
+        const handleSeeked = () => {
+          seekingRef.current = false;
+          videoEl.removeEventListener('seeked', handleSeeked);
+          videoEl.play().catch(e => console.warn('播放失败:', e));
+        };
+        
+        videoEl.addEventListener('seeked', handleSeeked);
+        
+        if (Math.abs(videoEl.currentTime - nextSentence.startTime) < 0.1) {
+          seekingRef.current = false;
+          videoEl.removeEventListener('seeked', handleSeeked);
+          videoEl.play().catch(e => console.warn('播放失败:', e));
+        }
       }
     } else {
       setIsPlaying(false);
@@ -381,6 +428,9 @@ export default function PracticeSession() {
                   onWaiting={() => setVideoLoading(true)}
                   onCanPlay={() => setVideoLoading(false)}
                   onTimeUpdate={() => {
+                    // 如果正在 seeking，不检查
+                    if (seekingRef.current) return;
+                    
                     if (videoRef.current && currentSentence && !sentenceEndedRef.current) {
                       if (videoRef.current.currentTime >= currentSentence.endTime) {
                         sentenceEndedRef.current = true;
