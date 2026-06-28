@@ -13,6 +13,7 @@ export default function VideoPlay() {
   const { playbackRate, setPlaybackRate, settings } = useAppStore();
   const [video, setVideo] = useState<Video | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loopMode, setLoopMode] = useState<'none' | 'single'>('none');
   const startTimeRef = useRef<number>(0);
   const watchedTimeRef = useRef<number>(0);
 
@@ -137,6 +138,8 @@ export default function VideoPlay() {
           onRateChange={handleRateChange}
           onTimeUpdate={handleTimeUpdate}
           onEnded={saveRecord}
+          loopMode={loopMode}
+          onLoopModeChange={setLoopMode}
         />
 
         <div className="mt-8 flex flex-wrap justify-center gap-4">

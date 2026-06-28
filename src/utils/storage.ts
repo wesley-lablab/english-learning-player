@@ -5,7 +5,7 @@ import {
   deleteVideoFromIndexedDB,
   checkStorageAvailable,
 } from './indexedDB';
-import { uploadToGitHub, addVideoToPlaylist, loadPlaylistFromGitHub } from './githubUpload';
+import { uploadToGitHub, addVideoToPlaylist, loadPlaylistFromGitHub, removeVideoFromPlaylist } from './githubUpload';
 
 const STORAGE_KEYS = {
   VIDEOS: 'elp_videos',
@@ -48,13 +48,13 @@ function generateId(): number {
 export const storageApi = {
   videos: {
     list: async (category?: string): Promise<{ success: boolean; data: Video[] }> => {
-      // 从 GitHub 加载云端视频
       const cloudVideos = await loadPlaylistFromGitHub();
+      const cloudIds = new Set(cloudVideos.map(v => v.id));
       
-      // 从本地加载
       const localVideos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+      const uniqueLocal = localVideos.filter(v => !cloudIds.has(v.id));
       
-      const allVideos = [...cloudVideos, ...localVideos];
+      const allVideos = [...cloudVideos, ...uniqueLocal];
       const filtered = category && category !== 'all'
         ? allVideos.filter(v => v.category === category)
         : allVideos;
@@ -78,19 +78,18 @@ export const storageApi = {
         try {
           if (onProgress) onProgress(5);
 
-          // 上传视频到 GitHub
           if (onProgress) onProgress(10);
           const uploadResult = await uploadToGitHub(file);
           
           if (!uploadResult.success || !uploadResult.url) {
             resolve({
               success: false,
-              error: uploadResult.error || '上传到云端失败',
+              error: uploadResult.error || '上传到云端失败，请先在设置中配置 GitHub Token',
             });
             return;
           }
           
-          if (onProgress) onProgress(50);
+          if (onProgress) onProgress(40);
 
           const videoId = generateId();
           const video: Video = {
@@ -107,7 +106,6 @@ export const storageApi = {
             isCloudHosted: true,
           };
 
-          // 生成缩略图
           let thumbFile: File | undefined;
           if (file.type.startsWith('video/')) {
             const videoEl = document.createElement('video');
@@ -160,9 +158,8 @@ export const storageApi = {
             });
           }
           
-          if (onProgress) onProgress(70);
+          if (onProgress) onProgress(60);
           
-          // 上传缩略图
           if (thumbFile) {
             const thumbUpload = await uploadToGitHub(thumbFile);
             if (thumbUpload.success && thumbUpload.url) {
@@ -170,17 +167,11 @@ export const storageApi = {
             }
           }
 
-          if (onProgress) onProgress(85);
+          if (onProgress) onProgress(80);
 
-          // 保存到 GitHub playlist（多端共享）
           const playlistOk = await addVideoToPlaylist(video, []);
           
           if (onProgress) onProgress(95);
-
-          // 也保存到本地
-          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-          videos.push(video);
-          saveToStorage(STORAGE_KEYS.VIDEOS, videos);
 
           if (onProgress) onProgress(100);
 
@@ -267,6 +258,12 @@ export const storageApi = {
             console.warn('删除IndexedDB中的视频失败', e);
           }
           
+          try {
+            await removeVideoFromPlaylist(id);
+          } catch (e) {
+            console.warn('从云端 playlist 删除视频失败', e);
+          }
+          
           resolve({ success: true });
         } catch (e) {
           resolve({ success: false, error: '删除失败' });
@@ -276,22 +273,19 @@ export const storageApi = {
 
     getSentences: async (videoId: number): Promise<{ success: boolean; data: Sentence[]; error?: string }> => {
       try {
-        // 先看云端
         const cloudVideos = await loadPlaylistFromGitHub();
         const cloudVideo = cloudVideos.find(v => v.id === videoId);
         
-        // 本地修改过的优先
+        if (cloudVideo && cloudVideo.sentences && cloudVideo.sentences.length > 0) {
+          return { success: true, data: cloudVideo.sentences };
+        }
+        
         const saved = localStorage.getItem(`sentences_${videoId}`);
         if (saved) {
           const parsed = JSON.parse(saved);
           if (parsed.length > 0) {
             return { success: true, data: parsed };
           }
-        }
-        
-        // 云端有句子的话用云端
-        if (cloudVideo && cloudVideo.sentences && cloudVideo.sentences.length > 0) {
-          return { success: true, data: cloudVideo.sentences };
         }
         
         return { success: true, data: [] };
@@ -305,7 +299,6 @@ export const storageApi = {
         try {
           localStorage.setItem(`sentences_${videoId}`, JSON.stringify(sentences));
           
-          // 同时更新云端 playlist（多端同步）
           const cloudVideos = await loadPlaylistFromGitHub();
           const cloudVideo = cloudVideos.find(v => v.id === videoId);
           if (cloudVideo) {

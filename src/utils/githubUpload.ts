@@ -1,10 +1,59 @@
 import type { Video, Sentence } from '../types';
 
-const GITHUB_TOKEN = import.meta.env.VITE_GITHUB_TOKEN;
-const GITHUB_OWNER = import.meta.env.VITE_GITHUB_OWNER || 'wesley-lablab';
-const GITHUB_REPO = import.meta.env.VITE_GITHUB_REPO || 'english-learning-player';
-const GITHUB_BRANCH = import.meta.env.VITE_GITHUB_BRANCH || 'main';
-const GITHUB_PATH = import.meta.env.VITE_GITHUB_PATH || 'public/videos';
+const GITHUB_SETTINGS_KEY = 'elp_github_settings';
+
+interface GitHubSettings {
+  token: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  path: string;
+}
+
+const DEFAULT_SETTINGS: GitHubSettings = {
+  token: '',
+  owner: 'wesley-lablab',
+  repo: 'english-learning-player',
+  branch: 'main',
+  path: 'public/videos',
+};
+
+function getGitHubSettings(): GitHubSettings {
+  try {
+    const saved = localStorage.getItem(GITHUB_SETTINGS_KEY);
+    if (saved) {
+      return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+    }
+  } catch {}
+  return DEFAULT_SETTINGS;
+}
+
+export function saveGitHubSettings(settings: Partial<GitHubSettings>): void {
+  try {
+    const current = getGitHubSettings();
+    localStorage.setItem(GITHUB_SETTINGS_KEY, JSON.stringify({ ...current, ...settings }));
+  } catch {}
+}
+
+export function getGitHubToken(): string {
+  return getGitHubSettings().token;
+}
+
+function getOwner(): string {
+  return getGitHubSettings().owner;
+}
+
+function getRepo(): string {
+  return getGitHubSettings().repo;
+}
+
+function getBranch(): string {
+  return getGitHubSettings().branch;
+}
+
+function getPath(): string {
+  return getGitHubSettings().path;
+}
 
 const API_BASE = 'https://api.github.com';
 
@@ -42,7 +91,7 @@ function generateFileName(originalName: string): string {
 }
 
 function getRawUrl(fileName: string): string {
-  return `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${GITHUB_PATH}/${fileName}`;
+  return `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${getBranch()}/${getPath()}/${fileName}`;
 }
 
 export function getPublicVideoUrl(fileName: string): string {
@@ -50,12 +99,13 @@ export function getPublicVideoUrl(fileName: string): string {
 }
 
 async function getFileSha(path: string): Promise<string | null> {
+  const token = getGitHubToken();
   try {
     const response = await fetch(
-      `${API_BASE}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`,
+      `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${path}`,
       {
         headers: {
-          'Authorization': `Bearer ${GITHUB_TOKEN}`,
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
           'Accept': 'application/vnd.github.v3+json'
         }
       }
@@ -71,20 +121,21 @@ async function getFileSha(path: string): Promise<string | null> {
 }
 
 async function putFile(path: string, content: string, message: string, sha?: string): Promise<boolean> {
+  const token = getGitHubToken();
   try {
     const response = await fetch(
-      `${API_BASE}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`,
+      `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${path}`,
       {
         method: 'PUT',
         headers: {
-          'Authorization': `Bearer ${GITHUB_TOKEN}`,
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
           'Content-Type': 'application/json',
           'Accept': 'application/vnd.github.v3+json'
         },
         body: JSON.stringify({
           message,
           content,
-          branch: GITHUB_BRANCH,
+          branch: getBranch(),
           ...(sha ? { sha } : {})
         })
       }
@@ -96,15 +147,18 @@ async function putFile(path: string, content: string, message: string, sha?: str
 }
 
 export async function uploadToGitHub(file: File): Promise<UploadResult> {
-  if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
+  const token = getGitHubToken();
+  const owner = getOwner();
+  const repo = getRepo();
+  if (!token || !owner || !repo) {
     return {
       success: false,
-      error: 'GitHub 配置不完整，请检查环境变量'
+      error: 'GitHub 配置不完整，请在家长端设置中配置 Token'
     };
   }
 
   const fileName = generateFileName(file.name);
-  const path = `${GITHUB_PATH}/${fileName}`;
+  const path = `${getPath()}/${fileName}`;
   const url = getRawUrl(fileName);
 
   try {
@@ -136,20 +190,21 @@ export async function uploadToGitHub(file: File): Promise<UploadResult> {
 }
 
 export async function addVideoToPlaylist(video: Video, sentences: Sentence[]): Promise<boolean> {
-  if (!GITHUB_TOKEN) return false;
+  const token = getGitHubToken();
+  if (!token) return false;
 
   try {
-    const playlistPath = `${GITHUB_PATH}/playlist.json`;
+    const playlistPath = `${getPath()}/playlist.json`;
     const sha = await getFileSha(playlistPath);
     
     let playlist: PlaylistData = { videos: [] };
     
     if (sha) {
       const response = await fetch(
-        `${API_BASE}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${playlistPath}`,
+        `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}`,
         {
           headers: {
-            'Authorization': `Bearer ${GITHUB_TOKEN}`,
+            'Authorization': `Bearer ${token}`,
             'Accept': 'application/vnd.github.v3+json'
           }
         }
@@ -193,6 +248,51 @@ export async function addVideoToPlaylist(video: Video, sentences: Sentence[]): P
     );
   } catch (e) {
     console.error('更新 playlist 失败:', e);
+    return false;
+  }
+}
+
+export async function removeVideoFromPlaylist(videoId: number): Promise<boolean> {
+  const token = getGitHubToken();
+  if (!token) return false;
+
+  try {
+    const playlistPath = `${getPath()}/playlist.json`;
+    const sha = await getFileSha(playlistPath);
+    
+    if (!sha) return true;
+    
+    const response = await fetch(
+      `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      }
+    );
+    
+    if (!response.ok) return false;
+    
+    const data = await response.json();
+    const decoded = atob(data.content);
+    const playlist: PlaylistData = JSON.parse(decoded);
+    
+    const filtered = playlist.videos.filter(v => v.id !== videoId);
+    if (filtered.length === playlist.videos.length) return true;
+    
+    playlist.videos = filtered;
+    const jsonContent = JSON.stringify(playlist, null, 2);
+    const base64Content = btoa(unescape(encodeURIComponent(jsonContent)));
+    
+    return await putFile(
+      playlistPath,
+      base64Content,
+      `Remove video from playlist: ${videoId}`,
+      sha
+    );
+  } catch (e) {
+    console.error('从 playlist 删除视频失败:', e);
     return false;
   }
 }

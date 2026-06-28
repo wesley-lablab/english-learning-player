@@ -184,10 +184,11 @@ export default function UploadVideo() {
               <div className="flex items-center gap-3 mb-3">
                 <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
                 <span className="font-medium text-gray-700">
-                  {progress < 10 ? '检查存储空间...' :
-                   progress < 30 ? '读取文件信息...' :
+                  {progress < 10 ? '准备上传...' :
+                   progress < 30 ? '上传视频到云端...' :
                    progress < 60 ? '生成缩略图...' :
-                   progress < 90 ? '保存到本地...' :
+                   progress < 80 ? '上传缩略图...' :
+                   progress < 95 ? '更新视频列表...' :
                    progress < 100 ? '即将完成...' :
                    '完成！'}
                   {progress > 0 && progress < 100 && ` ${progress}%`}
@@ -277,12 +278,12 @@ export default function UploadVideo() {
               {uploading ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  保存中...
+                  上传中...
                 </>
               ) : (
                 <>
                   <Upload className="w-5 h-5" />
-                  保存到本地
+                  上传到云端
                 </>
               )}
             </button>

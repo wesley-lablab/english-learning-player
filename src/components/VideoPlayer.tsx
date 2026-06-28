@@ -1,8 +1,8 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Maximize, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Maximize, Volume2, VolumeX, Repeat, Repeat1, Gauge } from 'lucide-react';
 import type { PlaybackRate } from '../types';
 import { formatDuration } from '../utils';
-import SpeedControl from './SpeedControl';
+import { setupMediaSession, updateMediaSessionPlaybackState, updateMediaSessionMetadata } from '../utils/mediaSession';
 
 interface VideoPlayerProps {
   videoUrl: string;
@@ -11,6 +11,8 @@ interface VideoPlayerProps {
   onRateChange: (rate: PlaybackRate) => void;
   onTimeUpdate?: (time: number, duration: number) => void;
   onEnded?: () => void;
+  loopMode?: 'none' | 'single';
+  onLoopModeChange?: (mode: 'none' | 'single') => void;
 }
 
 export default function VideoPlayer({
@@ -20,6 +22,8 @@ export default function VideoPlayer({
   onRateChange,
   onTimeUpdate,
   onEnded,
+  loopMode = 'none',
+  onLoopModeChange,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -28,7 +32,41 @@ export default function VideoPlayer({
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setupMediaSession(
+      title,
+      '英语学习视频',
+      () => {
+        if (videoRef.current) {
+          videoRef.current.play();
+          setIsPlaying(true);
+        }
+      },
+      () => {
+        if (videoRef.current) {
+          videoRef.current.pause();
+          setIsPlaying(false);
+        }
+      }
+    );
+    
+    return () => {
+      if ('mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.playbackState = 'none';
+        } catch (e) {}
+      }
+    };
+  }, [title]);
+
+  useEffect(() => {
+    updateMediaSessionPlaybackState(isPlaying);
+  }, [isPlaying]);
+
+  const playbackRates: PlaybackRate[] = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -113,8 +151,13 @@ export default function VideoPlayer({
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
     const handleEnded = () => {
-      setIsPlaying(false);
-      onEnded?.();
+      if (loopMode === 'single') {
+        video.currentTime = 0;
+        video.play();
+      } else {
+        setIsPlaying(false);
+        onEnded?.();
+      }
     };
 
     video.addEventListener('play', handlePlay);
@@ -126,7 +169,7 @@ export default function VideoPlayer({
       video.removeEventListener('pause', handlePause);
       video.removeEventListener('ended', handleEnded);
     };
-  }, [onEnded]);
+  }, [onEnded, loopMode]);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -146,6 +189,17 @@ export default function VideoPlayer({
         onClick={togglePlay}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => {
+          if (loopMode === 'single' && videoRef.current) {
+            videoRef.current.currentTime = 0;
+            videoRef.current.play();
+          } else {
+            setIsPlaying(false);
+            onEnded?.();
+          }
+        }}
         playsInline
       />
 
@@ -190,78 +244,111 @@ export default function VideoPlayer({
           </div>
         </div>
 
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             <button
               onClick={togglePlay}
-              className="w-14 h-14 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-all hover:scale-110"
+              className="w-9 h-9 sm:w-11 sm:h-11 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-all flex-shrink-0"
             >
               {isPlaying ? (
-                <Pause className="w-7 h-7 text-white" fill="currentColor" />
+                <Pause className="w-4 h-4 sm:w-5 sm:h-5 text-white" fill="currentColor" />
               ) : (
-                <Play className="w-7 h-7 text-white ml-1" fill="currentColor" />
+                <Play className="w-4 h-4 sm:w-5 sm:h-5 text-white ml-0.5" fill="currentColor" />
               )}
             </button>
 
             <button
               onClick={() => skip(-10)}
-              className="w-12 h-12 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-all hover:scale-110"
+              className="w-8 h-8 sm:w-9 sm:h-9 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-all flex-shrink-0"
               title="后退10秒"
             >
-              <SkipBack className="w-6 h-6 text-white" />
+              <SkipBack className="w-4 h-4 sm:w-4 sm:h-4 text-white" />
             </button>
 
             <button
               onClick={() => skip(10)}
-              className="w-12 h-12 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-all hover:scale-110"
+              className="w-8 h-8 sm:w-9 sm:h-9 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-all flex-shrink-0"
               title="前进10秒"
             >
-              <SkipForward className="w-6 h-6 text-white" />
+              <SkipForward className="w-4 h-4 sm:w-4 sm:h-4 text-white" />
             </button>
 
             <button
               onClick={toggleMute}
-              className="w-12 h-12 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-all hover:scale-110"
+              className="w-8 h-8 sm:w-9 sm:h-9 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-all flex-shrink-0"
             >
               {isMuted ? (
-                <VolumeX className="w-6 h-6 text-white" />
+                <VolumeX className="w-4 h-4 sm:w-4 sm:h-4 text-white" />
               ) : (
-                <Volume2 className="w-6 h-6 text-white" />
+                <Volume2 className="w-4 h-4 sm:w-4 sm:h-4 text-white" />
               )}
             </button>
 
-            <span className="text-white font-medium text-lg">
-              {formatDuration(currentTime)} / {formatDuration(duration)}
+            <button
+              onClick={() => {
+                if (!onLoopModeChange) return;
+                const nextMode = loopMode === 'none' ? 'single' : 'none';
+                onLoopModeChange(nextMode);
+              }}
+              className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${
+                loopMode === 'single' 
+                  ? 'bg-orange-500 text-white' 
+                  : 'bg-white/20 hover:bg-white/30 text-white'
+              }`}
+              title={loopMode === 'single' ? '循环播放中' : '循环播放'}
+            >
+              {loopMode === 'single' ? (
+                <Repeat1 className="w-4 h-4 sm:w-4 sm:h-4" />
+              ) : (
+                <Repeat className="w-4 h-4 sm:w-4 sm:h-4" />
+              )}
+            </button>
+
+            <div className="relative flex-shrink-0">
+              <button
+                onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                className="w-8 h-8 sm:w-9 sm:h-9 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-all text-white"
+                title="播放速度"
+              >
+                <Gauge className="w-4 h-4 sm:w-4 sm:h-4" />
+              </button>
+              
+              {showSpeedMenu && (
+                <div className="absolute bottom-10 left-0 bg-black/90 rounded-xl p-2 shadow-xl z-20 min-w-[100px]">
+                  {playbackRates.map((rate) => (
+                    <button
+                      key={rate}
+                      onClick={() => {
+                        onRateChange(rate);
+                        setShowSpeedMenu(false);
+                      }}
+                      className={`w-full text-left px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        rate === playbackRate
+                          ? 'bg-orange-500 text-white'
+                          : 'text-white/80 hover:bg-white/20'
+                      }`}
+                    >
+                      {rate}x
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <span className="text-white text-xs sm:text-sm font-medium whitespace-nowrap">
+              {formatDuration(currentTime)}
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="text-white text-lg font-bold max-w-xs truncate">
-              {title}
-            </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
             <button
               onClick={toggleFullscreen}
-              className="w-12 h-12 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-all hover:scale-110"
+              className="w-8 h-8 sm:w-9 sm:h-9 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-all"
             >
-              <Maximize className="w-6 h-6 text-white" />
+              <Maximize className="w-4 h-4 sm:w-4 sm:h-4 text-white" />
             </button>
           </div>
         </div>
-      </div>
-
-      <div 
-        className={`
-          absolute top-0 left-0 right-0
-          bg-gradient-to-b from-black/60 to-transparent
-          p-4 transition-opacity duration-300
-          ${showControls ? 'opacity-100' : 'opacity-0'}
-        `}
-      >
-        <h3 className="text-white text-xl font-bold">{title}</h3>
-      </div>
-
-      <div className={`mt-6 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-70'}`}>
-        <SpeedControl currentRate={playbackRate} onChange={onRateChange} />
       </div>
     </div>
   );

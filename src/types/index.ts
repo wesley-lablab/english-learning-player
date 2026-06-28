@@ -10,6 +10,8 @@ export interface Video {
   fileDataUrl?: string;
   fileType?: string;
   isPreset?: boolean;
+  isCloudHosted?: boolean;
+  sentences?: Sentence[];
 }
 
 export interface Category {
