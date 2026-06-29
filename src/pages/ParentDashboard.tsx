@@ -5,7 +5,7 @@ import type { Video, StudyStats, StudyRecord } from '../types';
 import { storageApi } from '../utils/storage';
 import { formatDuration, formatDate, getCategoryEmoji } from '../utils';
 import { useAppStore } from '../store/useAppStore';
-import { saveGitHubSettings } from '../utils/githubUpload';
+import { saveGitHubSettings, getGitHubTokenAsync } from '../utils/githubUpload';
 
 export default function ParentDashboard() {
   const navigate = useNavigate();
@@ -18,6 +18,26 @@ export default function ParentDashboard() {
   const [githubToken, setGithubToken] = useState('');
   const [githubOwner, setGithubOwner] = useState('wesley-lablab');
   const [githubRepo, setGithubRepo] = useState('english-learning-player');
+
+  // 初始化时从 GitHub 配置加载 Token
+  useEffect(() => {
+    const initSettings = async () => {
+      const token = await getGitHubTokenAsync();
+      if (token) {
+        setGithubToken(token);
+      }
+      // 也加载本地保存的其他设置
+      try {
+        const saved = localStorage.getItem('elp_github_settings');
+        if (saved) {
+          const settings = JSON.parse(saved);
+          if (settings.owner) setGithubOwner(settings.owner);
+          if (settings.repo) setGithubRepo(settings.repo);
+        }
+      } catch {}
+    };
+    initSettings();
+  }, []);
 
   useEffect(() => {
     checkAuth();
@@ -52,18 +72,6 @@ export default function ParentDashboard() {
     }
     setLoading(false);
   };
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('elp_github_settings');
-      if (saved) {
-        const settings = JSON.parse(saved);
-        setGithubToken(settings.token || '');
-        setGithubOwner(settings.owner || 'wesley-lablab');
-        setGithubRepo(settings.repo || 'english-learning-player');
-      }
-    } catch {}
-  }, []);
 
   const handleDelete = async (id: number, title: string) => {
     if (!confirm(`确定要删除视频「${title}」吗？删除后无法恢复。`)) return;

@@ -1,6 +1,7 @@
 import type { Video, Course, Sentence, PlaylistData } from '../types';
 
 const GITHUB_SETTINGS_KEY = 'elp_github_settings';
+const CONFIG_FILE = '.github-config.json';
 
 interface GitHubSettings {
   token: string;
@@ -8,6 +9,13 @@ interface GitHubSettings {
   repo: string;
   branch: string;
   path: string;
+}
+
+interface RemoteConfig {
+  githubToken: string;
+  owner: string;
+  repo: string;
+  lastUpdated: string;
 }
 
 const DEFAULT_SETTINGS: GitHubSettings = {
@@ -22,7 +30,92 @@ const DEFAULT_SETTINGS: GitHubSettings = {
 const DEPLOY_BRANCH = 'gh-pages';
 const DEPLOY_PATH = 'videos';
 
+// 缓存远程配置，避免重复请求
+let cachedRemoteConfig: RemoteConfig | null = null;
+
+// 从 GitHub 配置文件加载设置
+async function loadRemoteConfig(): Promise<RemoteConfig | null> {
+  if (cachedRemoteConfig) return cachedRemoteConfig;
+  
+  try {
+    const url = `https://raw.githubusercontent.com/${DEFAULT_SETTINGS.owner}/${DEFAULT_SETTINGS.repo}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${CONFIG_FILE}?t=${Date.now()}`;
+    const response = await fetch(url);
+    if (response.ok) {
+      cachedRemoteConfig = await response.json();
+      return cachedRemoteConfig;
+    }
+  } catch (e) {
+    console.warn('加载远程配置失败', e);
+  }
+  return null;
+}
+
+// 保存设置到 GitHub 配置文件
+export async function saveSettingsToGitHub(settings: Partial<GitHubSettings>): Promise<boolean> {
+  const token = DEFAULT_SETTINGS.token; // 使用已配置的 token
+  if (!token) return false;
+  
+  try {
+    const configPath = `${DEFAULT_SETTINGS.path}/${CONFIG_FILE}`;
+    
+    // 获取当前 SHA
+    const shaRes = await fetch(
+      `https://api.github.com/repos/${DEFAULT_SETTINGS.owner}/${DEFAULT_SETTINGS.repo}/contents/${configPath}?ref=${DEPLOY_BRANCH}`,
+      {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' }
+      }
+    );
+    
+    let sha: string | undefined;
+    if (shaRes.ok) {
+      const data = await shaRes.json();
+      sha = data.sha;
+    }
+    
+    // 构建新配置
+    const remoteConfig: RemoteConfig = {
+      githubToken: settings.token || DEFAULT_SETTINGS.token,
+      owner: settings.owner || DEFAULT_SETTINGS.owner,
+      repo: settings.repo || DEFAULT_SETTINGS.repo,
+      lastUpdated: new Date().toISOString(),
+    };
+    
+    const content = JSON.stringify(remoteConfig, null, 2);
+    const base64Content = btoa(unescape(encodeURIComponent(content)));
+    
+    // 写入 GitHub
+    const putRes = await fetch(
+      `https://api.github.com/repos/${DEFAULT_SETTINGS.owner}/${DEFAULT_SETTINGS.repo}/contents/${configPath}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/vnd.github.v3+json'
+        },
+        body: JSON.stringify({
+          message: 'Update GitHub config',
+          content: base64Content,
+          branch: DEPLOY_BRANCH,
+          ...(sha ? { sha } : {})
+        })
+      }
+    );
+    
+    return putRes.ok;
+  } catch (e) {
+    console.error('保存配置到 GitHub 失败', e);
+    return false;
+  }
+}
+
+// 清除缓存的配置（当 Token 改变时需要调用）
+export function clearConfigCache(): void {
+  cachedRemoteConfig = null;
+}
+
 function getGitHubSettings(): GitHubSettings {
+  // 优先使用 URL 参数中的 token
   try {
     const urlParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
     const urlToken = urlParams.get('token');
@@ -33,6 +126,7 @@ function getGitHubSettings(): GitHubSettings {
     }
   } catch {}
   
+  // 使用 localStorage
   try {
     const saved = localStorage.getItem(GITHUB_SETTINGS_KEY);
     if (saved) {
@@ -42,11 +136,40 @@ function getGitHubSettings(): GitHubSettings {
   return DEFAULT_SETTINGS;
 }
 
+// 异步获取 Token，优先使用 localStorage，否则尝试从远程配置获取
+export async function getGitHubTokenAsync(): Promise<string> {
+  const localSettings = getGitHubSettings();
+  if (localSettings.token) {
+    return localSettings.token;
+  }
+  
+  // 尝试从远程获取
+  const remoteConfig = await loadRemoteConfig();
+  if (remoteConfig?.githubToken) {
+    // 保存到 localStorage 以便下次快速获取
+    const settings = { ...DEFAULT_SETTINGS, token: remoteConfig.githubToken };
+    localStorage.setItem(GITHUB_SETTINGS_KEY, JSON.stringify(settings));
+    return remoteConfig.githubToken;
+  }
+  
+  return '';
+}
+
 export function saveGitHubSettings(settings: Partial<GitHubSettings>): void {
   try {
     const current = getGitHubSettings();
-    localStorage.setItem(GITHUB_SETTINGS_KEY, JSON.stringify({ ...current, ...settings }));
-  } catch {}
+    const merged = { ...current, ...settings };
+    localStorage.setItem(GITHUB_SETTINGS_KEY, JSON.stringify(merged));
+    
+    // 异步保存到 GitHub（不阻塞主流程）
+    saveSettingsToGitHub(settings).then(ok => {
+      if (ok) {
+        console.log('✅ 配置已同步到 GitHub');
+      }
+    });
+  } catch (e) {
+    console.error('保存设置失败', e);
+  }
 }
 
 export function getGitHubToken(): string {
