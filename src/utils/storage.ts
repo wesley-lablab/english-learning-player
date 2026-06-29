@@ -277,8 +277,8 @@ export const storageApi = {
           console.warn('删除IndexedDB中的视频失败', e);
         }
         
-        const ok = await removeVideoFromPlaylist(id);
-        return ok ? { success: true } : { success: false, error: '删除失败' };
+        const result = await removeVideoFromPlaylist(id);
+        return result;
       } catch (e) {
         return { success: false, error: '删除失败' };
       }

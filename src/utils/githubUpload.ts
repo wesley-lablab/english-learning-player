@@ -390,15 +390,19 @@ export async function addVideoToPlaylist(video: Video): Promise<boolean> {
 }
 
 // 从播放列表删除视频
-export async function removeVideoFromPlaylist(videoId: number): Promise<boolean> {
-  const token = getGitHubToken();
-  if (!token) return false;
+export async function removeVideoFromPlaylist(videoId: number): Promise<{ success: boolean; error?: string }> {
+  const token = await getGitHubTokenAsync();
+  if (!token) {
+    return { success: false, error: 'GitHub Token 未配置' };
+  }
 
   try {
     const playlistPath = `${getPath()}/playlist.json`;
     const sha = await getFileSha(playlistPath);
     
-    if (!sha) return true;
+    if (!sha) {
+      return { success: true };
+    }
     
     const response = await fetch(
       `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}`,
@@ -410,16 +414,16 @@ export async function removeVideoFromPlaylist(videoId: number): Promise<boolean>
       }
     );
     
-    if (!response.ok) return false;
+    if (!response.ok) {
+      return { success: false, error: `HTTP Error: ${response.status}` };
+    }
     
     const data = await response.json();
     const decoded = atob(data.content);
     const playlist: PlaylistData = JSON.parse(decoded);
     
-    // 从 videos 删除
     playlist.videos = playlist.videos.filter(v => v.id !== videoId);
     
-    // 从所有课程的 videoIds 中删除
     playlist.courses = playlist.courses.map(c => ({
       ...c,
       videoIds: c.videoIds.filter(id => id !== videoId)
@@ -428,15 +432,17 @@ export async function removeVideoFromPlaylist(videoId: number): Promise<boolean>
     const jsonContent = JSON.stringify(playlist, null, 2);
     const base64Content = btoa(unescape(encodeURIComponent(jsonContent)));
     
-    return await putFile(
+    const success = await putFile(
       playlistPath,
       base64Content,
       `Remove video from playlist: ${videoId}`,
       sha
     );
+    
+    return success ? { success: true } : { success: false, error: '上传到云端失败' };
   } catch (e) {
     console.error('从 playlist 删除视频失败:', e);
-    return false;
+    return { success: false, error: e instanceof Error ? e.message : '删除失败' };
   }
 }
 
