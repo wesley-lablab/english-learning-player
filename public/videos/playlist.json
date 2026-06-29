@@ -121,6 +121,18 @@
       "createdAt": "2026-06-29T05:27:23.634Z",
       "courseId": 1,
       "isPreset": true
+    },
+    {
+      "id": 1782710882106,
+      "title": "splish splash",
+      "description": "",
+      "category": "course",
+      "duration": 0,
+      "fileName": "1782710878590_6c5won_____2026_06_29_090148_100.mp4",
+      "thumbnail": "",
+      "createdAt": "2026-06-29T05:28:01.589Z",
+      "courseId": 1,
+      "isPreset": true
     }
   ]
 }
