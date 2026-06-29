@@ -18,6 +18,10 @@ const DEFAULT_SETTINGS: GitHubSettings = {
   path: 'public/videos',
 };
 
+// 部署后的静态资源路径（GitHub Pages）
+const DEPLOY_BRANCH = 'gh-pages';
+const DEPLOY_PATH = 'videos';
+
 function getGitHubSettings(): GitHubSettings {
   try {
     const saved = localStorage.getItem(GITHUB_SETTINGS_KEY);
@@ -299,15 +303,15 @@ export async function removeVideoFromPlaylist(videoId: number): Promise<boolean>
 
 export async function loadPlaylistFromGitHub(): Promise<Video[]> {
   try {
-    const rawUrl = getRawUrl('playlist.json') + `?t=${Date.now()}`;
-    const response = await fetch(rawUrl);
+    const playlistRawUrl = `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/playlist.json?t=${Date.now()}`;
+    const response = await fetch(playlistRawUrl);
     if (!response.ok) return [];
     
     const data: PlaylistData = await response.json();
     return data.videos.map(v => ({
       ...v,
-      fileDataUrl: getRawUrl(v.fileName),
-      thumbnail: v.thumbnail ? getRawUrl(v.thumbnail) : '',
+      fileDataUrl: `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${v.fileName}`,
+      thumbnail: v.thumbnail ? `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${v.thumbnail}` : '',
       sentences: v.sentences,
     }));
   } catch (e) {
