@@ -14,8 +14,8 @@ const DEFAULT_SETTINGS: GitHubSettings = {
   token: '',
   owner: 'wesley-lablab',
   repo: 'english-learning-player',
-  branch: 'main',
-  path: 'public/videos',
+  branch: 'gh-pages',
+  path: 'videos',
 };
 
 // 部署后的静态资源路径（GitHub Pages）
@@ -87,7 +87,7 @@ function generateFileName(originalName: string): string {
 }
 
 function getRawUrl(fileName: string): string {
-  return `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${getBranch()}/${getPath()}/${fileName}`;
+  return `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${fileName}`;
 }
 
 export function getPublicVideoUrl(fileName: string): string {
