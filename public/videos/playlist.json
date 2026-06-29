@@ -133,6 +133,18 @@
       "createdAt": "2026-06-29T05:28:01.589Z",
       "courseId": 1,
       "isPreset": true
+    },
+    {
+      "id": 1782710940756,
+      "title": "splish",
+      "description": "",
+      "category": "course",
+      "duration": 0,
+      "fileName": "1782710934424_vapfm4_____2026_06_29_090148_100.mp4",
+      "thumbnail": "",
+      "createdAt": "2026-06-29T05:29:00.243Z",
+      "courseId": 1,
+      "isPreset": true
     }
   ]
 }
