@@ -24,6 +24,16 @@ const DEPLOY_PATH = 'videos';
 
 function getGitHubSettings(): GitHubSettings {
   try {
+    const urlParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+    const urlToken = urlParams.get('token');
+    if (urlToken) {
+      const settings = { ...DEFAULT_SETTINGS, token: urlToken };
+      localStorage.setItem(GITHUB_SETTINGS_KEY, JSON.stringify(settings));
+      return settings;
+    }
+  } catch {}
+  
+  try {
     const saved = localStorage.getItem(GITHUB_SETTINGS_KEY);
     if (saved) {
       return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
