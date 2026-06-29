@@ -67,13 +67,20 @@ export default function ParentDashboard() {
 
   const handleDelete = async (id: number, title: string) => {
     if (!confirm(`确定要删除视频「${title}」吗？删除后无法恢复。`)) return;
+    
     try {
       const res = await storageApi.videos.delete(id);
       if (res.success) {
         alert('删除成功！');
         loadData();
       } else {
-        alert('删除失败：' + (res.error || '未知错误，请检查 GitHub Token 是否配置正确'));
+        // 更详细的错误提示
+        const errorMsg = res.error || '';
+        if (errorMsg.includes('Token') || errorMsg.includes('token')) {
+          alert('❌ 删除失败：GitHub Token 未配置或已失效。\n\n请到「设置」页面检查 GitHub Token 是否正确填写。');
+        } else {
+          alert('删除失败：' + errorMsg);
+        }
       }
     } catch (e) {
       console.error(e);
