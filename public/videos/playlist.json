@@ -3,8 +3,8 @@
     {
       "id": 1,
       "title": "A Bad Skunk",
-      "description": "è±è¯­å¯èå°æäº",
-      "icon": "ð",
+      "description": "Ã¨ÂÂ±Ã¨Â¯Â­Ã¥ÂÂ¯Ã¨ÂÂÃ¥Â°ÂÃ¦ÂÂÃ¤ÂºÂ",
+      "icon": "Ã°ÂÂÂ",
       "videoIds": [
         2001
       ],
@@ -15,7 +15,7 @@
     {
       "id": 2001,
       "title": "A Bad Skunk",
-      "description": "è±è¯­å¯èå°æäº",
+      "description": "Ã¨ÂÂ±Ã¨Â¯Â­Ã¥ÂÂ¯Ã¨ÂÂÃ¥Â°ÂÃ¦ÂÂÃ¤ÂºÂ",
       "category": "course",
       "duration": 45,
       "fileName": "mmexport1782556158760.mp4",
@@ -112,6 +112,18 @@
       "fileName": "1782695732668_jfmkbu_____2026_06_29_090202_348.mp4",
       "thumbnail": "",
       "createdAt": "2026-06-29T01:15:37.552Z",
+      "courseId": 1,
+      "isPreset": true
+    },
+    {
+      "id": 1782695854017,
+      "title": "spring",
+      "description": "",
+      "category": "course",
+      "duration": 0,
+      "fileName": "1782695849132_i0u1wp_____2026_06_29_090202_348.mp4",
+      "thumbnail": "",
+      "createdAt": "2026-06-29T01:17:33.992Z",
       "courseId": 1,
       "isPreset": true
     }
