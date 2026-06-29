@@ -362,7 +362,7 @@ export async function addVideoToPlaylist(video: Video): Promise<boolean> {
       );
       if (response.ok) {
         const data = await response.json();
-        const decoded = atob(data.content);
+        const decoded = decodeURIComponent(escape(atob(data.content)));
         playlist = JSON.parse(decoded);
       }
     }
@@ -469,7 +469,7 @@ export async function addCourseToPlaylist(course: Course): Promise<boolean> {
       );
       if (response.ok) {
         const data = await response.json();
-        const decoded = atob(data.content);
+        const decoded = decodeURIComponent(escape(atob(data.content)));
         playlist = JSON.parse(decoded);
       }
     }
