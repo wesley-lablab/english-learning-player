@@ -13,7 +13,6 @@ const STORAGE_KEYS = {
   SETTINGS: 'elp_settings',
   ADMIN_TOKEN: 'elp_admin_token',
   ADMIN_PASSWORD: 'elp_admin_password',
-  PRESET_SENTENCES: 'elp_preset_sentences',
 };
 
 const DEFAULT_CATEGORIES: Category[] = [
@@ -188,7 +187,6 @@ export const storageApi = {
     get: (id: number): Promise<{ success: boolean; data?: Video; error?: string }> => {
       return new Promise(async (resolve) => {
         try {
-          // 先看云端
           const cloudVideos = await loadPlaylistFromGitHub();
           const cloudVideo = cloudVideos.find(v => v.id === id);
           
@@ -197,7 +195,6 @@ export const storageApi = {
             return;
           }
           
-          // 再看本地
           const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
           const video = videos.find(v => v.id === id);
           
@@ -206,7 +203,6 @@ export const storageApi = {
             return;
           }
 
-          // 云端视频直接用 fileDataUrl
           if (video.fileDataUrl && video.fileDataUrl.startsWith('http')) {
             resolve({ success: true, data: video });
             return;
@@ -231,7 +227,6 @@ export const storageApi = {
 
     update: (id: number, data: Partial<Video>): Promise<{ success: boolean; data?: Video; error?: string }> => {
       return new Promise(async (resolve) => {
-        // 更新本地
         const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
         const index = videos.findIndex(v => v.id === id);
         if (index >= 0) {
@@ -250,7 +245,6 @@ export const storageApi = {
           const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
           const filtered = videos.filter(v => v.id !== id);
           saveToStorage(STORAGE_KEYS.VIDEOS, filtered);
-          localStorage.removeItem(`sentences_${id}`);
           
           try {
             await deleteVideoFromIndexedDB(id);
@@ -273,21 +267,10 @@ export const storageApi = {
 
     getSentences: async (videoId: number): Promise<{ success: boolean; data: Sentence[]; error?: string }> => {
       try {
-        const cloudVideos = await loadPlaylistFromGitHub();
-        const cloudVideo = cloudVideos.find(v => v.id === videoId);
-        
-        if (cloudVideo && cloudVideo.sentences && cloudVideo.sentences.length > 0) {
-          return { success: true, data: cloudVideo.sentences };
+        const res = await storageApi.videos.get(videoId);
+        if (res.success && res.data && res.data.sentences) {
+          return { success: true, data: res.data.sentences };
         }
-        
-        const saved = localStorage.getItem(`sentences_${videoId}`);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (parsed.length > 0) {
-            return { success: true, data: parsed };
-          }
-        }
-        
         return { success: true, data: [] };
       } catch (e) {
         return { success: false, data: [], error: '读取句子失败' };
@@ -297,7 +280,12 @@ export const storageApi = {
     saveSentences: (videoId: number, sentences: Sentence[]): Promise<{ success: boolean; error?: string }> => {
       return new Promise(async (resolve) => {
         try {
-          localStorage.setItem(`sentences_${videoId}`, JSON.stringify(sentences));
+          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+          const index = videos.findIndex(v => v.id === videoId);
+          if (index >= 0) {
+            videos[index].sentences = sentences;
+            saveToStorage(STORAGE_KEYS.VIDEOS, videos);
+          }
           
           const cloudVideos = await loadPlaylistFromGitHub();
           const cloudVideo = cloudVideos.find(v => v.id === videoId);

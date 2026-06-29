@@ -115,9 +115,8 @@ export default function PracticeSession() {
       const res = await storageApi.videos.get(parseInt(id, 10));
       if (res.data) {
         setVideo(res.data);
-        const sentencesRes = await storageApi.videos.getSentences(parseInt(id, 10));
-        if (sentencesRes.success && sentencesRes.data.length > 0) {
-          setSentences(sentencesRes.data);
+        if (res.data.sentences && res.data.sentences.length > 0) {
+          setSentences(res.data.sentences);
         }
       }
     } catch (e) {
