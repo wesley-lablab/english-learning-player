@@ -369,6 +369,16 @@ export async function getVideoFromPlaylist(videoId: number): Promise<Video | nul
   return videos.find(v => v.id === videoId) || null;
 }
 
+function cleanVideoForStorage(video: Video): Video {
+  const { fileDataUrl, ...rest } = video as any;
+  let thumbnail = rest.thumbnail || '';
+  if (thumbnail && thumbnail.startsWith('http')) {
+    const parts = thumbnail.split('/');
+    thumbnail = parts[parts.length - 1];
+  }
+  return { ...rest, thumbnail };
+}
+
 // 添加视频到播放列表
 export async function addVideoToPlaylist(video: Video): Promise<boolean> {
   const token = await getGitHubTokenAsync();
@@ -397,11 +407,12 @@ export async function addVideoToPlaylist(video: Video): Promise<boolean> {
       }
     }
 
+    const cleanVideo = cleanVideoForStorage(video);
     const existingIndex = playlist.videos.findIndex(v => v.id === video.id);
     if (existingIndex >= 0) {
-      playlist.videos[existingIndex] = { ...video, isPreset: true };
+      playlist.videos[existingIndex] = { ...cleanVideo, isPreset: true };
     } else {
-      playlist.videos.push({ ...video, isPreset: true });
+      playlist.videos.push({ ...cleanVideo, isPreset: true });
     }
 
     const jsonContent = JSON.stringify(playlist, null, 2);
@@ -583,7 +594,12 @@ export async function savePlaylist(playlist: PlaylistData): Promise<boolean> {
     const playlistPath = `${DEPLOY_PATH}/playlist.json`;
     const sha = await getFileSha(playlistPath, token);
     
-    const jsonContent = JSON.stringify(playlist, null, 2);
+    const cleanPlaylist: PlaylistData = {
+      courses: playlist.courses,
+      videos: playlist.videos.map(v => cleanVideoForStorage(v)),
+    };
+    
+    const jsonContent = JSON.stringify(cleanPlaylist, null, 2);
     const base64Content = btoa(unescape(encodeURIComponent(jsonContent)));
     
     return await putFile(
