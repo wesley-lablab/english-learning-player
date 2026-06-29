@@ -313,20 +313,48 @@ export async function uploadToGitHub(file: File): Promise<UploadResult> {
 // 加载完整的播放列表（包含课程和视频）
 export async function loadPlaylistFromGitHub(): Promise<{ courses: Course[]; videos: Video[] }> {
   try {
-    const playlistRawUrl = `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/playlist.json?t=${Date.now()}`;
-    const response = await fetch(playlistRawUrl);
-    if (!response.ok) return { courses: [], videos: [] };
+    // 使用 Git API 读取，避免 raw.githubusercontent.com 的 CDN 缓存延迟
+    const token = await getGitHubTokenAsync();
+    const playlistPath = `${DEPLOY_PATH}/playlist.json`;
     
-    const data: PlaylistData = await response.json();
+    const response = await fetch(
+      `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}?ref=${DEPLOY_BRANCH}`,
+      {
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      }
+    );
     
-    const videos = data.videos.map(v => ({
+    if (!response.ok) {
+      // 如果 Git API 失败，尝试用 raw URL（带时间戳避免缓存）
+      const playlistRawUrl = `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/playlist.json?t=${Date.now()}`;
+      const rawResponse = await fetch(playlistRawUrl);
+      if (!rawResponse.ok) return { courses: [], videos: [] };
+      
+      const data: PlaylistData = await rawResponse.json();
+      const videos = data.videos.map(v => ({
+        ...v,
+        fileDataUrl: `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${v.fileName}`,
+        thumbnail: v.thumbnail ? `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${v.thumbnail}` : '',
+      }));
+      
+      return { courses: data.courses || [], videos };
+    }
+    
+    const data = await response.json();
+    const decoded = decodeURIComponent(escape(atob(data.content)));
+    const playlist: PlaylistData = JSON.parse(decoded);
+    
+    const videos = playlist.videos.map(v => ({
       ...v,
       fileDataUrl: `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${v.fileName}`,
       thumbnail: v.thumbnail ? `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${v.thumbnail}` : '',
     }));
     
     return {
-      courses: data.courses || [],
+      courses: playlist.courses || [],
       videos,
     };
   } catch (e) {
