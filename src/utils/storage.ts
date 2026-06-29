@@ -251,9 +251,15 @@ export const storageApi = {
 
           const playlistOk = await addVideoToPlaylist(video);
           
-          // 如果指定了课程，自动添加到课程中
-          if (playlistOk && courseId) {
-            await storageApi.courses.addVideo(courseId, videoId);
+          if (playlistOk) {
+            if (courseId) {
+              await storageApi.courses.addVideo(courseId, videoId);
+            } else {
+              const { courses } = await loadPlaylistFromGitHub();
+              if (courses.length > 0) {
+                await storageApi.courses.addVideo(courses[0].id, videoId);
+              }
+            }
           }
           
           if (onProgress) onProgress(95);
