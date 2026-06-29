@@ -409,6 +409,14 @@ export default function SentenceEditor() {
 
   useEffect(() => {
     loadVideo();
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      if (transcribeEndCheckRef.current) {
+        clearInterval(transcribeEndCheckRef.current);
+      }
+    };
   }, [id]);
 
   const loadVideo = async () => {
