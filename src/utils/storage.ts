@@ -48,10 +48,10 @@ export const storageApi = {
   videos: {
     list: async (category?: string): Promise<{ success: boolean; data: Video[] }> => {
       const cloudVideos = await loadPlaylistFromGitHub();
-      const cloudIds = new Set(cloudVideos.map(v => v.id));
+      const cloudFileNames = new Set(cloudVideos.map(v => v.fileName));
       
       const localVideos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-      const uniqueLocal = localVideos.filter(v => !cloudIds.has(v.id));
+      const uniqueLocal = localVideos.filter(v => !cloudFileNames.has(v.fileName));
       
       const allVideos = [...cloudVideos, ...uniqueLocal];
       const filtered = category && category !== 'all'
