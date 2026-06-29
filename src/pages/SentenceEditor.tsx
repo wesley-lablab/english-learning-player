@@ -38,7 +38,21 @@ export default function SentenceEditor() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcribeSource, setTranscribeSource] = useState<'video' | 'mic' | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const transcribeEndCheckRef = useRef<number | null>(null);
+  const saveTimeoutRef = useRef<number | null>(null);
+
+  const showSaveStatus = (status: 'saving' | 'success' | 'error') => {
+    setSaveStatus(status);
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    if (status !== 'saving') {
+      saveTimeoutRef.current = window.setTimeout(() => {
+        setSaveStatus('idle');
+      }, 2000);
+    }
+  };
 
   const addLog = (msg: string) => {
     const time = new Date().toLocaleTimeString();
@@ -421,7 +435,19 @@ export default function SentenceEditor() {
     const sorted = [...newSentences].sort((a, b) => a.startTime - b.startTime);
     setSentences(sorted);
     if (id) {
-      await storageApi.videos.saveSentences(parseInt(id, 10), sorted);
+      showSaveStatus('saving');
+      try {
+        const res = await storageApi.videos.saveSentences(parseInt(id, 10), sorted);
+        if (res.success) {
+          showSaveStatus('success');
+        } else {
+          showSaveStatus('error');
+          console.error('保存失败:', res.error);
+        }
+      } catch (e) {
+        showSaveStatus('error');
+        console.error('保存失败:', e);
+      }
     }
   };
 
@@ -732,6 +758,18 @@ export default function SentenceEditor() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+
+      {saveStatus !== 'idle' && (
+        <div className={`fixed top-0 left-0 right-0 z-50 py-3 text-center text-white font-bold transition-all ${
+          saveStatus === 'saving' ? 'bg-blue-500' :
+          saveStatus === 'success' ? 'bg-green-500' :
+          'bg-red-500'
+        }`}>
+          {saveStatus === 'saving' && '⏳ 正在保存...'}
+          {saveStatus === 'success' && '✅ 保存成功！'}
+          {saveStatus === 'error' && '❌ 保存失败，请检查 GitHub Token 是否配置正确'}
+        </div>
+      )}
 
       <header className="bg-white border-b shadow-sm sticky top-0 z-20">
         <div className="max-w-6xl mx-auto px-6 py-4">

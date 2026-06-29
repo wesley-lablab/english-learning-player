@@ -66,14 +66,18 @@ export default function ParentDashboard() {
   }, []);
 
   const handleDelete = async (id: number, title: string) => {
-    if (!confirm(`确定要删除视频「${title}」吗？`)) return;
+    if (!confirm(`确定要删除视频「${title}」吗？删除后无法恢复。`)) return;
     try {
       const res = await storageApi.videos.delete(id);
       if (res.success) {
-        setVideos(videos.filter(v => v.id !== id));
+        alert('删除成功！');
+        loadData();
+      } else {
+        alert('删除失败：' + (res.error || '未知错误，请检查 GitHub Token 是否配置正确'));
       }
     } catch (e) {
       console.error(e);
+      alert('删除失败：' + (e as Error).message);
     }
   };
 
