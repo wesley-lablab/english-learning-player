@@ -419,7 +419,7 @@ export async function removeVideoFromPlaylist(videoId: number): Promise<{ succes
     }
     
     const data = await response.json();
-    const decoded = atob(data.content);
+    const decoded = decodeURIComponent(escape(atob(data.content)));
     const playlist: PlaylistData = JSON.parse(decoded);
     
     playlist.videos = playlist.videos.filter(v => v.id !== videoId);
@@ -520,7 +520,7 @@ export async function removeCourseFromPlaylist(courseId: number): Promise<boolea
     if (!response.ok) return false;
     
     const data = await response.json();
-    const decoded = atob(data.content);
+    const decoded = decodeURIComponent(escape(atob(data.content)));
     const playlist: PlaylistData = JSON.parse(decoded);
     
     playlist.courses = playlist.courses.filter(c => c.id !== courseId);
