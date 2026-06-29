@@ -52,15 +52,18 @@ async function loadRemoteConfig(): Promise<RemoteConfig | null> {
 
 // 保存设置到 GitHub 配置文件
 export async function saveSettingsToGitHub(settings: Partial<GitHubSettings>): Promise<boolean> {
-  const token = DEFAULT_SETTINGS.token; // 使用已配置的 token
+  const token = settings.token || getGitHubToken();
   if (!token) return false;
   
+  const owner = settings.owner || getOwner();
+  const repo = settings.repo || getRepo();
+  
   try {
-    const configPath = `${DEFAULT_SETTINGS.path}/${CONFIG_FILE}`;
+    const configPath = `${DEPLOY_PATH}/${CONFIG_FILE}`;
     
     // 获取当前 SHA
     const shaRes = await fetch(
-      `https://api.github.com/repos/${DEFAULT_SETTINGS.owner}/${DEFAULT_SETTINGS.repo}/contents/${configPath}?ref=${DEPLOY_BRANCH}`,
+      `${API_BASE}/repos/${owner}/${repo}/contents/${configPath}?ref=${DEPLOY_BRANCH}`,
       {
         headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' }
       }
@@ -74,9 +77,9 @@ export async function saveSettingsToGitHub(settings: Partial<GitHubSettings>): P
     
     // 构建新配置
     const remoteConfig: RemoteConfig = {
-      githubToken: settings.token || DEFAULT_SETTINGS.token,
-      owner: settings.owner || DEFAULT_SETTINGS.owner,
-      repo: settings.repo || DEFAULT_SETTINGS.repo,
+      githubToken: token,
+      owner,
+      repo,
       lastUpdated: new Date().toISOString(),
     };
     
@@ -85,7 +88,7 @@ export async function saveSettingsToGitHub(settings: Partial<GitHubSettings>): P
     
     // 写入 GitHub
     const putRes = await fetch(
-      `https://api.github.com/repos/${DEFAULT_SETTINGS.owner}/${DEFAULT_SETTINGS.repo}/contents/${configPath}`,
+      `${API_BASE}/repos/${owner}/${repo}/contents/${configPath}`,
       {
         method: 'PUT',
         headers: {
@@ -217,14 +220,13 @@ export function getPublicVideoUrl(fileName: string): string {
   return getRawUrl(fileName);
 }
 
-async function getFileSha(path: string): Promise<string | null> {
-  const token = getGitHubToken();
+async function getFileSha(path: string, token: string): Promise<string | null> {
   try {
     const response = await fetch(
-      `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${path}`,
+      `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${path}?ref=${DEPLOY_BRANCH}`,
       {
         headers: {
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          'Authorization': `Bearer ${token}`,
           'Accept': 'application/vnd.github.v3+json'
         }
       }
@@ -239,22 +241,21 @@ async function getFileSha(path: string): Promise<string | null> {
   }
 }
 
-async function putFile(path: string, content: string, message: string, sha?: string): Promise<boolean> {
-  const token = getGitHubToken();
+async function putFile(path: string, content: string, message: string, token: string, sha?: string): Promise<boolean> {
   try {
     const response = await fetch(
       `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${path}`,
       {
         method: 'PUT',
         headers: {
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
           'Accept': 'application/vnd.github.v3+json'
         },
         body: JSON.stringify({
           message,
           content,
-          branch: getBranch(),
+          branch: DEPLOY_BRANCH,
           ...(sha ? { sha } : {})
         })
       }
@@ -266,7 +267,7 @@ async function putFile(path: string, content: string, message: string, sha?: str
 }
 
 export async function uploadToGitHub(file: File): Promise<UploadResult> {
-  const token = getGitHubToken();
+  const token = await getGitHubTokenAsync();
   const owner = getOwner();
   const repo = getRepo();
   if (!token || !owner || !repo) {
@@ -277,7 +278,7 @@ export async function uploadToGitHub(file: File): Promise<UploadResult> {
   }
 
   const fileName = generateFileName(file.name);
-  const path = `${getPath()}/${fileName}`;
+  const path = `${DEPLOY_PATH}/${fileName}`;
   const url = getRawUrl(fileName);
 
   try {
@@ -286,11 +287,12 @@ export async function uploadToGitHub(file: File): Promise<UploadResult> {
       new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
     );
 
-    const existingSha = await getFileSha(path);
+    const existingSha = await getFileSha(path, token);
     const success = await putFile(
       path,
       base64Content,
       `Upload: ${fileName}`,
+      token,
       existingSha || undefined
     );
 
@@ -341,18 +343,18 @@ export async function getVideoFromPlaylist(videoId: number): Promise<Video | nul
 
 // 添加视频到播放列表
 export async function addVideoToPlaylist(video: Video): Promise<boolean> {
-  const token = getGitHubToken();
+  const token = await getGitHubTokenAsync();
   if (!token) return false;
 
   try {
-    const playlistPath = `${getPath()}/playlist.json`;
-    const sha = await getFileSha(playlistPath);
+    const playlistPath = `${DEPLOY_PATH}/playlist.json`;
+    const sha = await getFileSha(playlistPath, token);
     
     let playlist: PlaylistData = { courses: [], videos: [] };
     
     if (sha) {
       const response = await fetch(
-        `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}`,
+        `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}?ref=${DEPLOY_BRANCH}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -381,6 +383,7 @@ export async function addVideoToPlaylist(video: Video): Promise<boolean> {
       playlistPath,
       base64Content,
       `Update playlist: add ${video.title}`,
+      token,
       sha || undefined
     );
   } catch (e) {
@@ -397,15 +400,15 @@ export async function removeVideoFromPlaylist(videoId: number): Promise<{ succes
   }
 
   try {
-    const playlistPath = `${getPath()}/playlist.json`;
-    const sha = await getFileSha(playlistPath);
+    const playlistPath = `${DEPLOY_PATH}/playlist.json`;
+    const sha = await getFileSha(playlistPath, token);
     
     if (!sha) {
       return { success: true };
     }
     
     const response = await fetch(
-      `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}`,
+      `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}?ref=${DEPLOY_BRANCH}`,
       {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -436,6 +439,7 @@ export async function removeVideoFromPlaylist(videoId: number): Promise<{ succes
       playlistPath,
       base64Content,
       `Remove video from playlist: ${videoId}`,
+      token,
       sha
     );
     
@@ -448,18 +452,18 @@ export async function removeVideoFromPlaylist(videoId: number): Promise<{ succes
 
 // 添加课程
 export async function addCourseToPlaylist(course: Course): Promise<boolean> {
-  const token = getGitHubToken();
+  const token = await getGitHubTokenAsync();
   if (!token) return false;
 
   try {
-    const playlistPath = `${getPath()}/playlist.json`;
-    const sha = await getFileSha(playlistPath);
+    const playlistPath = `${DEPLOY_PATH}/playlist.json`;
+    const sha = await getFileSha(playlistPath, token);
     
     let playlist: PlaylistData = { courses: [], videos: [] };
     
     if (sha) {
       const response = await fetch(
-        `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}`,
+        `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}?ref=${DEPLOY_BRANCH}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -488,6 +492,7 @@ export async function addCourseToPlaylist(course: Course): Promise<boolean> {
       playlistPath,
       base64Content,
       `Update playlist: add course ${course.title}`,
+      token,
       sha || undefined
     );
   } catch (e) {
@@ -498,17 +503,17 @@ export async function addCourseToPlaylist(course: Course): Promise<boolean> {
 
 // 删除课程
 export async function removeCourseFromPlaylist(courseId: number): Promise<boolean> {
-  const token = getGitHubToken();
+  const token = await getGitHubTokenAsync();
   if (!token) return false;
 
   try {
-    const playlistPath = `${getPath()}/playlist.json`;
-    const sha = await getFileSha(playlistPath);
+    const playlistPath = `${DEPLOY_PATH}/playlist.json`;
+    const sha = await getFileSha(playlistPath, token);
     
     if (!sha) return true;
     
     const response = await fetch(
-      `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}`,
+      `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}?ref=${DEPLOY_BRANCH}`,
       {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -532,6 +537,7 @@ export async function removeCourseFromPlaylist(courseId: number): Promise<boolea
       playlistPath,
       base64Content,
       `Remove course from playlist: ${courseId}`,
+      token,
       sha
     );
   } catch (e) {
@@ -542,12 +548,12 @@ export async function removeCourseFromPlaylist(courseId: number): Promise<boolea
 
 // 更新播放列表（保存整个列表）
 export async function savePlaylist(playlist: PlaylistData): Promise<boolean> {
-  const token = getGitHubToken();
+  const token = await getGitHubTokenAsync();
   if (!token) return false;
 
   try {
-    const playlistPath = `${getPath()}/playlist.json`;
-    const sha = await getFileSha(playlistPath);
+    const playlistPath = `${DEPLOY_PATH}/playlist.json`;
+    const sha = await getFileSha(playlistPath, token);
     
     const jsonContent = JSON.stringify(playlist, null, 2);
     const base64Content = btoa(unescape(encodeURIComponent(jsonContent)));
@@ -556,6 +562,7 @@ export async function savePlaylist(playlist: PlaylistData): Promise<boolean> {
       playlistPath,
       base64Content,
       `Save playlist`,
+      token,
       sha || undefined
     );
   } catch (e) {
