@@ -1,4 +1,4 @@
-import type { Video, Sentence } from '../types';
+import type { Video, Course, Sentence, PlaylistData } from '../types';
 
 const GITHUB_SETTINGS_KEY = 'elp_github_settings';
 
@@ -66,24 +66,6 @@ export interface UploadResult {
   url?: string;
   fileName?: string;
   error?: string;
-}
-
-interface PlaylistVideo {
-  id: number;
-  title: string;
-  description: string;
-  category: string;
-  duration: number;
-  fileName: string;
-  fileType: string;
-  thumbnail: string;
-  createdAt: string;
-  isPreset: boolean;
-  sentences: Sentence[];
-}
-
-interface PlaylistData {
-  videos: PlaylistVideo[];
 }
 
 function generateFileName(originalName: string): string {
@@ -175,7 +157,7 @@ export async function uploadToGitHub(file: File): Promise<UploadResult> {
     const success = await putFile(
       path,
       base64Content,
-      `Upload video: ${fileName}`,
+      `Upload: ${fileName}`,
       existingSha || undefined
     );
 
@@ -193,7 +175,39 @@ export async function uploadToGitHub(file: File): Promise<UploadResult> {
   }
 }
 
-export async function addVideoToPlaylist(video: Video, sentences: Sentence[]): Promise<boolean> {
+// 加载完整的播放列表（包含课程和视频）
+export async function loadPlaylistFromGitHub(): Promise<{ courses: Course[]; videos: Video[] }> {
+  try {
+    const playlistRawUrl = `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/playlist.json?t=${Date.now()}`;
+    const response = await fetch(playlistRawUrl);
+    if (!response.ok) return { courses: [], videos: [] };
+    
+    const data: PlaylistData = await response.json();
+    
+    const videos = data.videos.map(v => ({
+      ...v,
+      fileDataUrl: `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${v.fileName}`,
+      thumbnail: v.thumbnail ? `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${v.thumbnail}` : '',
+    }));
+    
+    return {
+      courses: data.courses || [],
+      videos,
+    };
+  } catch (e) {
+    console.warn('加载 playlist 失败', e);
+    return { courses: [], videos: [] };
+  }
+}
+
+// 获取单个视频
+export async function getVideoFromPlaylist(videoId: number): Promise<Video | null> {
+  const { videos } = await loadPlaylistFromGitHub();
+  return videos.find(v => v.id === videoId) || null;
+}
+
+// 添加视频到播放列表
+export async function addVideoToPlaylist(video: Video): Promise<boolean> {
   const token = getGitHubToken();
   if (!token) return false;
 
@@ -201,7 +215,7 @@ export async function addVideoToPlaylist(video: Video, sentences: Sentence[]): P
     const playlistPath = `${getPath()}/playlist.json`;
     const sha = await getFileSha(playlistPath);
     
-    let playlist: PlaylistData = { videos: [] };
+    let playlist: PlaylistData = { courses: [], videos: [] };
     
     if (sha) {
       const response = await fetch(
@@ -220,25 +234,11 @@ export async function addVideoToPlaylist(video: Video, sentences: Sentence[]): P
       }
     }
 
-    const playlistVideo: PlaylistVideo = {
-      id: video.id,
-      title: video.title,
-      description: video.description,
-      category: video.category,
-      duration: video.duration,
-      fileName: video.fileName,
-      fileType: video.fileType || 'video/mp4',
-      thumbnail: video.thumbnail || '',
-      createdAt: video.createdAt,
-      isPreset: true,
-      sentences: sentences || []
-    };
-
     const existingIndex = playlist.videos.findIndex(v => v.id === video.id);
     if (existingIndex >= 0) {
-      playlist.videos[existingIndex] = playlistVideo;
+      playlist.videos[existingIndex] = { ...video, isPreset: true };
     } else {
-      playlist.videos.push(playlistVideo);
+      playlist.videos.push({ ...video, isPreset: true });
     }
 
     const jsonContent = JSON.stringify(playlist, null, 2);
@@ -256,6 +256,7 @@ export async function addVideoToPlaylist(video: Video, sentences: Sentence[]): P
   }
 }
 
+// 从播放列表删除视频
 export async function removeVideoFromPlaylist(videoId: number): Promise<boolean> {
   const token = getGitHubToken();
   if (!token) return false;
@@ -282,10 +283,15 @@ export async function removeVideoFromPlaylist(videoId: number): Promise<boolean>
     const decoded = atob(data.content);
     const playlist: PlaylistData = JSON.parse(decoded);
     
-    const filtered = playlist.videos.filter(v => v.id !== videoId);
-    if (filtered.length === playlist.videos.length) return true;
+    // 从 videos 删除
+    playlist.videos = playlist.videos.filter(v => v.id !== videoId);
     
-    playlist.videos = filtered;
+    // 从所有课程的 videoIds 中删除
+    playlist.courses = playlist.courses.map(c => ({
+      ...c,
+      videoIds: c.videoIds.filter(id => id !== videoId)
+    })).filter(c => c.videoIds.length > 0);
+    
     const jsonContent = JSON.stringify(playlist, null, 2);
     const base64Content = btoa(unescape(encodeURIComponent(jsonContent)));
     
@@ -301,21 +307,120 @@ export async function removeVideoFromPlaylist(videoId: number): Promise<boolean>
   }
 }
 
-export async function loadPlaylistFromGitHub(): Promise<Video[]> {
+// 添加课程
+export async function addCourseToPlaylist(course: Course): Promise<boolean> {
+  const token = getGitHubToken();
+  if (!token) return false;
+
   try {
-    const playlistRawUrl = `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/playlist.json?t=${Date.now()}`;
-    const response = await fetch(playlistRawUrl);
-    if (!response.ok) return [];
+    const playlistPath = `${getPath()}/playlist.json`;
+    const sha = await getFileSha(playlistPath);
     
-    const data: PlaylistData = await response.json();
-    return data.videos.map(v => ({
-      ...v,
-      fileDataUrl: `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${v.fileName}`,
-      thumbnail: v.thumbnail ? `https://raw.githubusercontent.com/${getOwner()}/${getRepo()}/${DEPLOY_BRANCH}/${DEPLOY_PATH}/${v.thumbnail}` : '',
-      sentences: v.sentences,
-    }));
+    let playlist: PlaylistData = { courses: [], videos: [] };
+    
+    if (sha) {
+      const response = await fetch(
+        `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        const decoded = atob(data.content);
+        playlist = JSON.parse(decoded);
+      }
+    }
+
+    const existingIndex = playlist.courses.findIndex(c => c.id === course.id);
+    if (existingIndex >= 0) {
+      playlist.courses[existingIndex] = course;
+    } else {
+      playlist.courses.push(course);
+    }
+
+    const jsonContent = JSON.stringify(playlist, null, 2);
+    const base64Content = btoa(unescape(encodeURIComponent(jsonContent)));
+    
+    return await putFile(
+      playlistPath,
+      base64Content,
+      `Update playlist: add course ${course.title}`,
+      sha || undefined
+    );
   } catch (e) {
-    console.warn('加载 playlist 失败', e);
-    return [];
+    console.error('更新 playlist 失败:', e);
+    return false;
+  }
+}
+
+// 删除课程
+export async function removeCourseFromPlaylist(courseId: number): Promise<boolean> {
+  const token = getGitHubToken();
+  if (!token) return false;
+
+  try {
+    const playlistPath = `${getPath()}/playlist.json`;
+    const sha = await getFileSha(playlistPath);
+    
+    if (!sha) return true;
+    
+    const response = await fetch(
+      `${API_BASE}/repos/${getOwner()}/${getRepo()}/contents/${playlistPath}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      }
+    );
+    
+    if (!response.ok) return false;
+    
+    const data = await response.json();
+    const decoded = atob(data.content);
+    const playlist: PlaylistData = JSON.parse(decoded);
+    
+    playlist.courses = playlist.courses.filter(c => c.id !== courseId);
+    
+    const jsonContent = JSON.stringify(playlist, null, 2);
+    const base64Content = btoa(unescape(encodeURIComponent(jsonContent)));
+    
+    return await putFile(
+      playlistPath,
+      base64Content,
+      `Remove course from playlist: ${courseId}`,
+      sha
+    );
+  } catch (e) {
+    console.error('从 playlist 删除课程失败:', e);
+    return false;
+  }
+}
+
+// 更新播放列表（保存整个列表）
+export async function savePlaylist(playlist: PlaylistData): Promise<boolean> {
+  const token = getGitHubToken();
+  if (!token) return false;
+
+  try {
+    const playlistPath = `${getPath()}/playlist.json`;
+    const sha = await getFileSha(playlistPath);
+    
+    const jsonContent = JSON.stringify(playlist, null, 2);
+    const base64Content = btoa(unescape(encodeURIComponent(jsonContent)));
+    
+    return await putFile(
+      playlistPath,
+      base64Content,
+      `Save playlist`,
+      sha || undefined
+    );
+  } catch (e) {
+    console.error('保存 playlist 失败:', e);
+    return false;
   }
 }

@@ -1,3 +1,15 @@
+// 课程 - 包含多个视频
+export interface Course {
+  id: number;
+  title: string;
+  description: string;
+  icon: string;
+  videoIds: number[];
+  audioFileName?: string;
+  createdAt: string;
+}
+
+// 视频
 export interface Video {
   id: number;
   title: string;
@@ -9,9 +21,27 @@ export interface Video {
   createdAt: string;
   fileDataUrl?: string;
   fileType?: string;
+  courseId?: number;
+  audioFileName?: string;
   isPreset?: boolean;
-  isCloudHosted?: boolean;
   sentences?: Sentence[];
+}
+
+// 播放列表数据
+export interface PlaylistData {
+  courses: Course[];
+  videos: Video[];
+}
+
+// 播放模式
+export type PlayMode = 'single' | 'loop-one' | 'loop-all';
+export type LoopMode = 'none' | 'single' | 'all';
+
+// 组合播放状态
+export interface PlaylistState {
+  videos: Video[];
+  currentIndex: number;
+  playMode: LoopMode;
 }
 
 export interface Category {

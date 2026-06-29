@@ -1,24 +1,26 @@
-import type { Video, Category, StudyRecord, Settings, StudyStats, Sentence } from '../types';
+import type { Video, Course, Category, StudyRecord, Settings, StudyStats, Sentence, PlaylistData } from '../types';
 import { 
   saveVideoToIndexedDB, 
   getVideoFromIndexedDB, 
   deleteVideoFromIndexedDB,
-  checkStorageAvailable,
 } from './indexedDB';
-import { uploadToGitHub, addVideoToPlaylist, loadPlaylistFromGitHub, removeVideoFromPlaylist } from './githubUpload';
+import { 
+  uploadToGitHub, 
+  addVideoToPlaylist, 
+  loadPlaylistFromGitHub, 
+  removeVideoFromPlaylist,
+  addCourseToPlaylist,
+  removeCourseFromPlaylist,
+} from './githubUpload';
 
 const STORAGE_KEYS = {
   VIDEOS: 'elp_videos',
+  COURSES: 'elp_courses',
   RECORDS: 'elp_records',
   SETTINGS: 'elp_settings',
   ADMIN_TOKEN: 'elp_admin_token',
   ADMIN_PASSWORD: 'elp_admin_password',
 };
-
-const DEFAULT_CATEGORIES: Category[] = [
-  { id: 'course', name: '课程', icon: '📚', color: 'blue', sortOrder: 1 },
-  { id: 'extension', name: '课程拓展', icon: '🌟', color: 'purple', sortOrder: 2 },
-];
 
 const DEFAULT_SETTINGS: Settings = {
   childName: '小朋友',
@@ -45,32 +47,113 @@ function generateId(): number {
 }
 
 export const storageApi = {
-  videos: {
-    list: async (category?: string): Promise<{ success: boolean; data: Video[] }> => {
-      const cloudVideos = await loadPlaylistFromGitHub();
-      const cloudFileNames = new Set(cloudVideos.map(v => v.fileName));
-      
-      const localVideos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-      const uniqueLocal = localVideos.filter(v => !cloudFileNames.has(v.fileName));
-      
-      const allVideos = [...cloudVideos, ...uniqueLocal];
-      const filtered = category && category !== 'all'
-        ? allVideos.filter(v => v.category === category)
-        : allVideos;
-      
-      return {
-        success: true,
-        data: filtered.sort((a, b) => 
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        ),
+  courses: {
+    list: async (): Promise<{ success: boolean; data: Course[] }> => {
+      const { courses } = await loadPlaylistFromGitHub();
+      return { success: true, data: courses };
+    },
+
+    get: async (id: number): Promise<{ success: boolean; data?: Course; error?: string }> => {
+      const { courses } = await loadPlaylistFromGitHub();
+      const course = courses.find(c => c.id === id);
+      if (course) {
+        return { success: true, data: course };
+      }
+      return { success: false, error: '课程不存在' };
+    },
+
+    create: async (title: string, description: string = '', icon: string = '📚'): Promise<{ success: boolean; data?: Course; error?: string }> => {
+      const course: Course = {
+        id: generateId(),
+        title,
+        description,
+        icon,
+        videoIds: [],
+        createdAt: new Date().toISOString(),
       };
+
+      const ok = await addCourseToPlaylist(course);
+      if (ok) {
+        return { success: true, data: course };
+      }
+      return { success: false, error: '创建课程失败' };
+    },
+
+    update: async (id: number, data: Partial<Course>): Promise<{ success: boolean; error?: string }> => {
+      const { courses } = await loadPlaylistFromGitHub();
+      const index = courses.findIndex(c => c.id === id);
+      if (index < 0) {
+        return { success: false, error: '课程不存在' };
+      }
+
+      const updated = { ...courses[index], ...data };
+      const ok = await addCourseToPlaylist(updated);
+      return ok ? { success: true } : { success: false, error: '更新失败' };
+    },
+
+    delete: async (id: number): Promise<{ success: boolean; error?: string }> => {
+      const ok = await removeCourseFromPlaylist(id);
+      return ok ? { success: true } : { success: false, error: '删除失败' };
+    },
+
+    addVideo: async (courseId: number, videoId: number): Promise<{ success: boolean; error?: string }> => {
+      const { courses } = await loadPlaylistFromGitHub();
+      const index = courses.findIndex(c => c.id === courseId);
+      if (index < 0) {
+        return { success: false, error: '课程不存在' };
+      }
+
+      if (!courses[index].videoIds.includes(videoId)) {
+        courses[index].videoIds.push(videoId);
+        const ok = await addCourseToPlaylist(courses[index]);
+        return ok ? { success: true } : { success: false, error: '添加视频失败' };
+      }
+      return { success: true };
+    },
+
+    removeVideo: async (courseId: number, videoId: number): Promise<{ success: boolean; error?: string }> => {
+      const { courses } = await loadPlaylistFromGitHub();
+      const index = courses.findIndex(c => c.id === courseId);
+      if (index < 0) {
+        return { success: false, error: '课程不存在' };
+      }
+
+      courses[index].videoIds = courses[index].videoIds.filter(id => id !== videoId);
+      const ok = await addCourseToPlaylist(courses[index]);
+      return ok ? { success: true } : { success: false, error: '移除视频失败' };
+    },
+  },
+
+  videos: {
+    list: async (courseId?: number): Promise<{ success: boolean; data: Video[] }> => {
+      const { videos, courses } = await loadPlaylistFromGitHub();
+      
+      // 如果指定了课程，只返回该课程的视频
+      if (courseId) {
+        const course = courses.find(c => c.id === courseId);
+        if (course) {
+          const courseVideos = videos.filter(v => course.videoIds.includes(v.id));
+          return { success: true, data: courseVideos };
+        }
+      }
+      
+      return { success: true, data: videos };
+    },
+
+    get: async (id: number): Promise<{ success: boolean; data?: Video; error?: string }> => {
+      const { videos } = await loadPlaylistFromGitHub();
+      const video = videos.find(v => v.id === id);
+      if (video) {
+        return { success: true, data: video };
+      }
+      return { success: false, error: '视频不存在' };
     },
 
     upload: async (
       file: File,
       title: string,
       description: string,
-      category: string,
+      courseId?: number,
       onProgress?: (percent: number) => void
     ): Promise<{ success: boolean; data?: Video; error?: string }> => {
       return new Promise(async (resolve) => {
@@ -95,14 +178,12 @@ export const storageApi = {
             id: videoId,
             title,
             description,
-            category,
+            category: 'course',
             duration: 0,
             fileName: uploadResult.fileName || file.name,
             thumbnail: '',
             createdAt: new Date().toISOString(),
-            fileDataUrl: uploadResult.url,
-            fileType: file.type,
-            isCloudHosted: true,
+            courseId,
           };
 
           let thumbFile: File | undefined;
@@ -168,10 +249,14 @@ export const storageApi = {
 
           if (onProgress) onProgress(80);
 
-          const playlistOk = await addVideoToPlaylist(video, []);
+          const playlistOk = await addVideoToPlaylist(video);
+          
+          // 如果指定了课程，自动添加到课程中
+          if (playlistOk && courseId) {
+            await storageApi.courses.addVideo(courseId, videoId);
+          }
           
           if (onProgress) onProgress(95);
-
           if (onProgress) onProgress(100);
 
           resolve({ success: true, data: video });
@@ -184,85 +269,19 @@ export const storageApi = {
       });
     },
 
-    get: (id: number): Promise<{ success: boolean; data?: Video; error?: string }> => {
-      return new Promise(async (resolve) => {
+    delete: async (id: number): Promise<{ success: boolean; error?: string }> => {
+      try {
         try {
-          const cloudVideos = await loadPlaylistFromGitHub();
-          const cloudVideo = cloudVideos.find(v => v.id === id);
-          
-          if (cloudVideo) {
-            resolve({ success: true, data: cloudVideo });
-            return;
-          }
-          
-          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-          const video = videos.find(v => v.id === id);
-          
-          if (!video) {
-            resolve({ success: false, error: '视频不存在' });
-            return;
-          }
-
-          if (video.fileDataUrl && video.fileDataUrl.startsWith('http')) {
-            resolve({ success: true, data: video });
-            return;
-          }
-
-          if (!video.fileDataUrl) {
-            const stored = await getVideoFromIndexedDB(id);
-            if (stored && stored.file) {
-              video.fileDataUrl = URL.createObjectURL(stored.file);
-              if (stored.thumbnail && !video.thumbnail) {
-                video.thumbnail = URL.createObjectURL(stored.thumbnail);
-              }
-            }
-          }
-
-          resolve({ success: true, data: video });
-        } catch (err) {
-          resolve({ success: false, error: '读取失败' });
-        }
-      });
-    },
-
-    update: (id: number, data: Partial<Video>): Promise<{ success: boolean; data?: Video; error?: string }> => {
-      return new Promise(async (resolve) => {
-        const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-        const index = videos.findIndex(v => v.id === id);
-        if (index >= 0) {
-          videos[index] = { ...videos[index], ...data };
-          saveToStorage(STORAGE_KEYS.VIDEOS, videos);
-          resolve({ success: true, data: videos[index] });
-        } else {
-          resolve({ success: false, error: '视频不存在' });
-        }
-      });
-    },
-
-    delete: (id: number): Promise<{ success: boolean; error?: string }> => {
-      return new Promise(async (resolve) => {
-        try {
-          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-          const filtered = videos.filter(v => v.id !== id);
-          saveToStorage(STORAGE_KEYS.VIDEOS, filtered);
-          
-          try {
-            await deleteVideoFromIndexedDB(id);
-          } catch (e) {
-            console.warn('删除IndexedDB中的视频失败', e);
-          }
-          
-          try {
-            await removeVideoFromPlaylist(id);
-          } catch (e) {
-            console.warn('从云端 playlist 删除视频失败', e);
-          }
-          
-          resolve({ success: true });
+          await deleteVideoFromIndexedDB(id);
         } catch (e) {
-          resolve({ success: false, error: '删除失败' });
+          console.warn('删除IndexedDB中的视频失败', e);
         }
-      });
+        
+        const ok = await removeVideoFromPlaylist(id);
+        return ok ? { success: true } : { success: false, error: '删除失败' };
+      } catch (e) {
+        return { success: false, error: '删除失败' };
+      }
     },
 
     getSentences: async (videoId: number): Promise<{ success: boolean; data: Sentence[]; error?: string }> => {
@@ -277,35 +296,18 @@ export const storageApi = {
       }
     },
 
-    saveSentences: (videoId: number, sentences: Sentence[]): Promise<{ success: boolean; error?: string }> => {
-      return new Promise(async (resolve) => {
-        try {
-          const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
-          const index = videos.findIndex(v => v.id === videoId);
-          if (index >= 0) {
-            videos[index].sentences = sentences;
-            saveToStorage(STORAGE_KEYS.VIDEOS, videos);
-          }
-          
-          const cloudVideos = await loadPlaylistFromGitHub();
-          const cloudVideo = cloudVideos.find(v => v.id === videoId);
-          if (cloudVideo) {
-            await addVideoToPlaylist(cloudVideo, sentences);
-          }
-          
-          resolve({ success: true });
-        } catch (e) {
-          resolve({ success: false, error: '保存失败' });
+    saveSentences: async (videoId: number, sentences: Sentence[]): Promise<{ success: boolean; error?: string }> => {
+      try {
+        const video = await storageApi.videos.get(videoId);
+        if (video.success && video.data) {
+          video.data.sentences = sentences;
+          const ok = await addVideoToPlaylist(video.data);
+          return ok ? { success: true } : { success: false, error: '保存失败' };
         }
-      });
-    },
-  },
-
-  categories: {
-    list: (): Promise<{ success: boolean; data: Category[] }> => {
-      return new Promise((resolve) => {
-        resolve({ success: true, data: DEFAULT_CATEGORIES });
-      });
+        return { success: false, error: '视频不存在' };
+      } catch (e) {
+        return { success: false, error: '保存失败' };
+      }
     },
   },
 
@@ -379,8 +381,8 @@ export const storageApi = {
     },
 
     stats: (): Promise<{ success: boolean; data: StudyStats }> => {
-      return new Promise((resolve) => {
-        const videos = getFromStorage<Video[]>(STORAGE_KEYS.VIDEOS, []);
+      return new Promise(async (resolve) => {
+        const { videos } = await loadPlaylistFromGitHub();
         const records = getFromStorage<StudyRecord[]>(STORAGE_KEYS.RECORDS, []);
         const totalDuration = records.reduce((sum, r) => sum + r.watchedDuration, 0);
         resolve({

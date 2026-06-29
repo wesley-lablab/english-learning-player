@@ -1,4 +1,14 @@
 {
+  "courses": [
+    {
+      "id": 1,
+      "title": "A Bad Skunk",
+      "description": "英语启蒙小故事",
+      "icon": "📚",
+      "videoIds": [2001],
+      "audioFileName": "a-bad-skunk.mp3"
+    }
+  ],
   "videos": [
     {
       "id": 2001,
@@ -7,88 +17,22 @@
       "category": "course",
       "duration": 45,
       "fileName": "mmexport1782556158760.mp4",
-      "fileType": "video/mp4",
       "thumbnail": "",
       "createdAt": "2026-01-02T00:00:00.000Z",
+      "courseId": 1,
       "isPreset": true,
       "sentences": [
-        {
-          "id": "s1",
-          "text": "A bad skunk.",
-          "startTime": 0,
-          "endTime": 4,
-          "translation": ""
-        },
-        {
-          "id": "s2",
-          "text": "It's a pretty spring day.",
-          "startTime": 4,
-          "endTime": 8,
-          "translation": ""
-        },
-        {
-          "id": "s3",
-          "text": "The squid skids are in school.",
-          "startTime": 8,
-          "endTime": 12,
-          "translation": ""
-        },
-        {
-          "id": "s4",
-          "text": "We have fun and play.",
-          "startTime": 12,
-          "endTime": 16,
-          "translation": ""
-        },
-        {
-          "id": "s5",
-          "text": "Learn and grow every day.",
-          "startTime": 16,
-          "endTime": 20,
-          "translation": ""
-        },
-        {
-          "id": "s6",
-          "text": "Friends together we stay.",
-          "startTime": 20,
-          "endTime": 24,
-          "translation": ""
-        },
-        {
-          "id": "s7",
-          "text": "Smiling all the way.",
-          "startTime": 24,
-          "endTime": 28,
-          "translation": ""
-        },
-        {
-          "id": "s8",
-          "text": "Love to learn and say.",
-          "startTime": 28,
-          "endTime": 32,
-          "translation": ""
-        },
-        {
-          "id": "s9",
-          "text": "Hooray for school today!",
-          "startTime": 32,
-          "endTime": 37,
-          "translation": ""
-        },
-        {
-          "id": "s10",
-          "text": "Hooray!",
-          "startTime": 37,
-          "endTime": 41,
-          "translation": ""
-        },
-        {
-          "id": "s11",
-          "text": "The end.",
-          "startTime": 41,
-          "endTime": 45,
-          "translation": ""
-        }
+        { "id": "s1", "text": "A bad skunk.", "startTime": 0, "endTime": 4, "translation": "" },
+        { "id": "s2", "text": "It's a pretty spring day.", "startTime": 4, "endTime": 8, "translation": "" },
+        { "id": "s3", "text": "The squid skids are in school.", "startTime": 8, "endTime": 12, "translation": "" },
+        { "id": "s4", "text": "We have fun and play.", "startTime": 12, "endTime": 16, "translation": "" },
+        { "id": "s5", "text": "Learn and grow every day.", "startTime": 16, "endTime": 20, "translation": "" },
+        { "id": "s6", "text": "Friends together we stay.", "startTime": 20, "endTime": 24, "translation": "" },
+        { "id": "s7", "text": "Smiling all the way.", "startTime": 24, "endTime": 28, "translation": "" },
+        { "id": "s8", "text": "Love to learn and say.", "startTime": 28, "endTime": 32, "translation": "" },
+        { "id": "s9", "text": "Hooray for school today!", "startTime": 32, "endTime": 37, "translation": "" },
+        { "id": "s10", "text": "Hooray!", "startTime": 37, "endTime": 41, "translation": "" },
+        { "id": "s11", "text": "The end.", "startTime": 41, "endTime": 45, "translation": "" }
       ]
     }
   ]

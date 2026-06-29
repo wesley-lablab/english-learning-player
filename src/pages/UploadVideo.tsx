@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Upload, ArrowLeft, FileVideo, CheckCircle, X, Loader2 } from 'lucide-react';
-import type { Category } from '../types';
+import { useNavigate } from 'react-router-dom';
+import { Upload, ArrowLeft, FileVideo, CheckCircle, X, Loader2, FolderPlus } from 'lucide-react';
+import type { Course } from '../types';
 import { storageApi } from '../utils/storage';
 
 export default function UploadVideo() {
@@ -10,21 +10,24 @@ export default function UploadVideo() {
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('course');
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState<number | undefined>();
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [showNewCourse, setShowNewCourse] = useState(false);
+  const [newCourseTitle, setNewCourseTitle] = useState('');
+  const [newCourseIcon, setNewCourseIcon] = useState('📚');
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    loadCategories();
+    loadCourses();
   }, []);
 
-  const loadCategories = async () => {
-    const res = await storageApi.categories.list();
+  const loadCourses = async () => {
+    const res = await storageApi.courses.list();
     if (res.data) {
-      setCategories(res.data);
+      setCourses(res.data);
     }
   };
 
@@ -39,6 +42,23 @@ export default function UploadVideo() {
     }
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const handleCreateCourse = async () => {
+    if (!newCourseTitle.trim()) {
+      setError('请输入课程名称');
+      return;
+    }
+    
+    const res = await storageApi.courses.create(newCourseTitle, '', newCourseIcon);
+    if (res.success && res.data) {
+      setCourses([...courses, res.data]);
+      setSelectedCourseId(res.data.id);
+      setShowNewCourse(false);
+      setNewCourseTitle('');
+    } else {
+      setError(res.error || '创建课程失败');
     }
   };
 
@@ -63,7 +83,7 @@ export default function UploadVideo() {
         file,
         title,
         description,
-        category,
+        selectedCourseId,
         (percent) => {
           setProgress(percent);
         }
@@ -100,7 +120,7 @@ export default function UploadVideo() {
             <CheckCircle className="w-12 h-12 text-green-500" />
           </div>
           <h2 className="text-2xl font-bold text-gray-800 mb-2">上传成功！</h2>
-          <p className="text-gray-500">即将跳转...</p>
+          <p className="text-gray-600">正在跳转...</p>
         </div>
       </div>
     );
@@ -108,186 +128,200 @@ export default function UploadVideo() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-3xl mx-auto px-6 py-4">
-          <div className="flex items-center gap-4">
-            <Link
-              to="/parent/dashboard"
-              className="w-10 h-10 hover:bg-gray-100 rounded-full flex items-center justify-center"
-            >
-              <ArrowLeft className="w-5 h-5 text-gray-600" />
-            </Link>
-            <h1 className="text-xl font-bold text-gray-800">上传文件</h1>
-          </div>
+      <header className="bg-white shadow-sm py-4 px-6">
+        <div className="max-w-2xl mx-auto flex items-center gap-4">
+          <button
+            onClick={() => navigate('/parent/dashboard')}
+            className="w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center transition-all"
+          >
+            <ArrowLeft className="w-5 h-5 text-gray-600" />
+          </button>
+          <h1 className="text-xl font-bold text-gray-800">上传视频</h1>
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-6 py-8">
+      <main className="max-w-2xl mx-auto px-6 py-8">
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* 文件选择区域 */}
-          <div>
-            <div className="block text-gray-700 font-bold mb-3">选择文件</div>
-            {!file ? (
-              <div className="relative w-full border-3 border-dashed border-gray-300 rounded-2xl bg-white hover:border-blue-400 hover:bg-blue-50 active:bg-blue-100 transition-all overflow-hidden" style={{ minHeight: '200px', WebkitTapHighlightColor: 'transparent' }}>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="video/*,image/*"
-                  onChange={handleFileChange}
-                  className="absolute inset-0 w-full h-full m-0 p-0 opacity-0 cursor-pointer"
-                  style={{ zIndex: 20, fontSize: '0' }}
-                />
-                <div className="absolute inset-0 flex flex-col items-center justify-center p-8 pointer-events-none" style={{ zIndex: 10 }}>
-                  <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mb-4">
-                    <Upload className="w-10 h-10 text-blue-500" />
-                  </div>
-                  <p className="text-lg font-bold text-gray-700 mb-2">
-                    点击选择文件
-                  </p>
-                  <p className="text-gray-500 text-sm text-center">
-                    支持视频（MP4、MOV等）和图片文件
-                  </p>
-                  <p className="text-blue-500 text-sm mt-3">
-                    👆 点击任意位置选择
-                  </p>
+          {/* 文件选择 */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <h2 className="text-lg font-bold text-gray-800 mb-4">选择文件</h2>
+            
+            {file ? (
+              <div className="flex items-center gap-4 bg-green-50 rounded-xl p-4">
+                <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+                  <FileVideo className="w-6 h-6 text-green-600" />
                 </div>
+                <div className="flex-1">
+                  <p className="font-medium text-gray-800 truncate">{file.name}</p>
+                  <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={removeFile}
+                  className="w-10 h-10 bg-red-100 hover:bg-red-200 rounded-full flex items-center justify-center transition-all"
+                >
+                  <X className="w-5 h-5 text-red-600" />
+                </button>
               </div>
             ) : (
-              <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 bg-orange-100 rounded-xl flex items-center justify-center">
-                      <FileVideo className="w-7 h-7 text-orange-500" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-gray-800">{file.name}</p>
-                      <p className="text-sm text-gray-500">
-                        {(file.size / (1024 * 1024)).toFixed(2)} MB
-                      </p>
-                    </div>
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-orange-400 hover:bg-orange-50 transition-all"
+              >
+                <Upload className="w-12 h-12 mx-auto text-gray-400 mb-3" />
+                <p className="text-gray-600">点击选择视频或音频文件</p>
+                <p className="text-sm text-gray-400 mt-1">支持 mp4, mov, mp3 等格式</p>
+              </div>
+            )}
+            
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="video/*,audio/*"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+          </div>
+
+          {/* 课程选择 */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <h2 className="text-lg font-bold text-gray-800 mb-4">选择课程</h2>
+            
+            <div className="space-y-2">
+              {courses.map((course) => (
+                <button
+                  key={course.id}
+                  type="button"
+                  onClick={() => setSelectedCourseId(course.id)}
+                  className={`w-full p-4 rounded-xl flex items-center gap-3 transition-all text-left ${
+                    selectedCourseId === course.id
+                      ? 'bg-orange-100 border-2 border-orange-400'
+                      : 'bg-gray-50 hover:bg-gray-100 border-2 border-transparent'
+                  }`}
+                >
+                  <span className="text-2xl">{course.icon}</span>
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-800">{course.title}</p>
+                    <p className="text-sm text-gray-500">{course.videoIds.length} 个视频</p>
                   </div>
+                  {selectedCourseId === course.id && (
+                    <CheckCircle className="w-6 h-6 text-orange-500" />
+                  )}
+                </button>
+              ))}
+              
+              {!showNewCourse && (
+                <button
+                  type="button"
+                  onClick={() => setShowNewCourse(true)}
+                  className="w-full p-4 rounded-xl flex items-center gap-3 bg-gray-50 hover:bg-gray-100 border-2 border-dashed border-gray-300 transition-all"
+                >
+                  <FolderPlus className="w-6 h-6 text-gray-400" />
+                  <span className="text-gray-600">创建新课程</span>
+                </button>
+              )}
+            </div>
+            
+            {showNewCourse && (
+              <div className="mt-4 p-4 bg-orange-50 rounded-xl space-y-3">
+                <input
+                  type="text"
+                  value={newCourseTitle}
+                  onChange={(e) => setNewCourseTitle(e.target.value)}
+                  placeholder="输入课程名称"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none"
+                />
+                <div className="flex gap-2">
+                  {['📚', '🎬', '🎵', '📖', '✏️', '🌟'].map((icon) => (
+                    <button
+                      key={icon}
+                      type="button"
+                      onClick={() => setNewCourseIcon(icon)}
+                      className={`w-10 h-10 rounded-lg text-xl flex items-center justify-center transition-all ${
+                        newCourseIcon === icon ? 'bg-orange-400 text-white' : 'bg-white hover:bg-gray-100'
+                      }`}
+                    >
+                      {icon}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={removeFile}
-                    className="w-10 h-10 text-red-500 hover:bg-red-50 rounded-lg flex items-center justify-center"
+                    onClick={handleCreateCourse}
+                    className="flex-1 bg-orange-500 text-white py-2 rounded-lg hover:bg-orange-600 transition-all"
                   >
-                    <X className="w-5 h-5" />
+                    确认创建
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewCourse(false)}
+                    className="px-4 bg-gray-200 text-gray-600 rounded-lg hover:bg-gray-300 transition-all"
+                  >
+                    取消
                   </button>
                 </div>
               </div>
             )}
           </div>
 
+          {/* 标题和描述 */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">标题</label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="输入视频标题"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">描述（可选）</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="输入视频描述"
+                rows={3}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none resize-none"
+              />
+            </div>
+          </div>
+
           {/* 上传进度 */}
           {uploading && (
-            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-200">
+            <div className="bg-white rounded-2xl p-6 shadow-sm">
               <div className="flex items-center gap-3 mb-3">
-                <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
-                <span className="font-medium text-gray-700">
-                  {progress < 10 ? '准备上传...' :
-                   progress < 30 ? '上传视频到云端...' :
-                   progress < 60 ? '生成缩略图...' :
-                   progress < 80 ? '上传缩略图...' :
-                   progress < 95 ? '更新视频列表...' :
-                   progress < 100 ? '即将完成...' :
-                   '完成！'}
-                  {progress > 0 && progress < 100 && ` ${progress}%`}
-                </span>
+                <Loader2 className="w-5 h-5 text-orange-500 animate-spin" />
+                <span className="font-medium text-gray-800">上传中...</span>
+                <span className="text-gray-500">{progress}%</span>
               </div>
-              <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+              <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-blue-500 to-blue-600 transition-all"
+                  className="h-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all"
                   style={{ width: `${progress}%` }}
                 />
               </div>
             </div>
           )}
 
-          {/* 标题和分类 */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 space-y-5">
-            <div>
-              <label className="block text-gray-700 font-bold mb-2">标题 *</label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="请输入标题"
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-400 focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-gray-700 font-bold mb-2">分类</label>
-              <div className="flex flex-wrap gap-2">
-                {categories.map((cat) => (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    onClick={() => setCategory(cat.id)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-full font-medium transition-all ${
-                      category === cat.id
-                        ? 'text-white shadow-md'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                    style={category === cat.id ? { backgroundColor: cat.color } : {}}
-                  >
-                    <span>{cat.icon}</span>
-                    <span>{cat.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-gray-700 font-bold mb-2">描述（选填）</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="请输入描述"
-                rows={3}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-400 focus:outline-none resize-none"
-              />
-            </div>
-          </div>
-
           {/* 错误提示 */}
           {error && (
-            <div className="bg-red-50 text-red-500 p-4 rounded-xl text-center font-medium">
+            <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl">
               {error}
             </div>
           )}
 
           {/* 提交按钮 */}
-          <div className="flex gap-4">
-            <button
-              type="button"
-              onClick={() => navigate('/parent/dashboard')}
-              className="flex-1 py-4 border-2 border-gray-200 text-gray-600 font-bold rounded-xl hover:bg-gray-50"
-            >
-              取消
-            </button>
-            <button
-              type="submit"
-              disabled={uploading || !file || !title.trim()}
-              className={`flex-1 py-4 font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${
-                uploading || !file || !title.trim()
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white hover:shadow-xl'
-              }`}
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  上传中...
-                </>
-              ) : (
-                <>
-                  <Upload className="w-5 h-5" />
-                  上传到云端
-                </>
-              )}
-            </button>
-          </div>
+          <button
+            type="submit"
+            disabled={uploading || !file || !title.trim()}
+            className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {uploading ? '上传中...' : '开始上传'}
+          </button>
         </form>
       </main>
     </div>
