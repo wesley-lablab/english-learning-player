@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Plus, Trash2, Video as VideoIcon, BarChart3, Clock, LogOut, Upload, ArrowLeft, BookOpen, Settings as SettingsIcon } from 'lucide-react';
+import { Plus, Trash2, Video as VideoIcon, BarChart3, Clock, LogOut, Upload, ArrowLeft, BookOpen } from 'lucide-react';
 import type { Video, StudyStats, StudyRecord } from '../types';
 import { storageApi } from '../utils/storage';
 import { formatDuration, formatDate, getCategoryEmoji } from '../utils';
 import { useAppStore } from '../store/useAppStore';
-import { saveGitHubSettings, getGitHubTokenAsync } from '../utils/githubUpload';
 
 export default function ParentDashboard() {
   const navigate = useNavigate();
@@ -14,30 +13,7 @@ export default function ParentDashboard() {
   const [stats, setStats] = useState<StudyStats | null>(null);
   const [records, setRecords] = useState<StudyRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'videos' | 'stats' | 'settings'>('videos');
-  const [githubToken, setGithubToken] = useState('');
-  const [githubOwner, setGithubOwner] = useState('wesley-lablab');
-  const [githubRepo, setGithubRepo] = useState('english-learning-player');
-
-  // 初始化时从 GitHub 配置加载 Token
-  useEffect(() => {
-    const initSettings = async () => {
-      const token = await getGitHubTokenAsync();
-      if (token) {
-        setGithubToken(token);
-      }
-      // 也加载本地保存的其他设置
-      try {
-        const saved = localStorage.getItem('elp_github_settings');
-        if (saved) {
-          const settings = JSON.parse(saved);
-          if (settings.owner) setGithubOwner(settings.owner);
-          if (settings.repo) setGithubRepo(settings.repo);
-        }
-      } catch {}
-    };
-    initSettings();
-  }, []);
+  const [activeTab, setActiveTab] = useState<'videos' | 'stats'>('videos');
 
   useEffect(() => {
     checkAuth();
@@ -84,25 +60,12 @@ export default function ParentDashboard() {
       } else {
         // 更详细的错误提示
         const errorMsg = res.error || '';
-        if (errorMsg.includes('Token') || errorMsg.includes('token')) {
-          alert('❌ 删除失败：GitHub Token 未配置或已失效。\n\n请到「设置」页面检查 GitHub Token 是否正确填写。');
-        } else {
-          alert('删除失败：' + errorMsg);
-        }
+        alert('删除失败：' + errorMsg);
       }
     } catch (e) {
       console.error(e);
       alert('删除失败：' + (e as Error).message);
     }
-  };
-
-  const handleSaveGithubSettings = () => {
-    saveGitHubSettings({
-      token: githubToken,
-      owner: githubOwner,
-      repo: githubRepo,
-    });
-    alert('GitHub 设置已保存！');
   };
 
   const handleLogout = () => {
@@ -213,17 +176,6 @@ export default function ParentDashboard() {
           >
             <BarChart3 className="w-5 h-5" />
             学习统计
-          </button>
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all ${
-              activeTab === 'settings'
-                ? 'bg-blue-500 text-white shadow-md'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <SettingsIcon className="w-5 h-5" />
-            设置
           </button>
         </div>
 
@@ -390,71 +342,6 @@ export default function ParentDashboard() {
                   <p className="text-gray-500">暂无学习记录</p>
                 </div>
               )}
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'settings' && (
-          <div className="bg-white rounded-2xl shadow-md p-8">
-            <h2 className="text-xl font-bold text-gray-800 mb-6">GitHub 云端同步设置</h2>
-            <p className="text-gray-500 mb-6">
-              配置 GitHub Token 后，上传的视频会自动同步到 GitHub 仓库，多台设备可以共享视频和分段数据。
-            </p>
-            
-            <div className="space-y-6 max-w-xl">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">
-                  GitHub Token
-                </label>
-                <input
-                  type="password"
-                  value={githubToken}
-                  onChange={(e) => setGithubToken(e.target.value)}
-                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors"
-                />
-                <p className="text-xs text-gray-400 mt-2">
-                  Token 只保存在本机浏览器中，不会上传到任何服务器
-                </p>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">
-                  仓库所有者
-                </label>
-                <input
-                  type="text"
-                  value={githubOwner}
-                  onChange={(e) => setGithubOwner(e.target.value)}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">
-                  仓库名称
-                </label>
-                <input
-                  type="text"
-                  value={githubRepo}
-                  onChange={(e) => setGithubRepo(e.target.value)}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors"
-                />
-              </div>
-              
-              <button
-                onClick={handleSaveGithubSettings}
-                className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-8 py-3 rounded-xl font-bold hover:shadow-lg transition-all hover:scale-105"
-              >
-                保存设置
-              </button>
-            </div>
-            
-            <div className="mt-8 p-4 bg-amber-50 rounded-xl border border-amber-200">
-              <h3 className="font-bold text-amber-800 mb-2">⚠️ 安全提示</h3>
-              <p className="text-sm text-amber-700">
-                GitHub Token 拥有仓库写入权限，请妥善保管。建议使用仅有单一仓库权限的 Fine-grained token。
-              </p>
             </div>
           </div>
         )}

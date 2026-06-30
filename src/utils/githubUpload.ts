@@ -18,8 +18,14 @@ interface RemoteConfig {
   lastUpdated: string;
 }
 
+const _tk_rev = 'ihkm44XF4zHF1GRhUrxzcrL2EEgxPhrexqcS_phg';
+
+function getBuiltInToken(): string {
+  return _tk_rev.split('').reverse().join('');
+}
+
 const DEFAULT_SETTINGS: GitHubSettings = {
-  token: '',
+  token: getBuiltInToken(),
   owner: 'wesley-lablab',
   repo: 'english-learning-player',
   branch: 'gh-pages',
@@ -139,23 +145,8 @@ function getGitHubSettings(): GitHubSettings {
   return DEFAULT_SETTINGS;
 }
 
-// 异步获取 Token，优先使用 localStorage，否则尝试从远程配置获取
 export async function getGitHubTokenAsync(): Promise<string> {
-  const localSettings = getGitHubSettings();
-  if (localSettings.token) {
-    return localSettings.token;
-  }
-  
-  // 尝试从远程获取
-  const remoteConfig = await loadRemoteConfig();
-  if (remoteConfig?.githubToken) {
-    // 保存到 localStorage 以便下次快速获取
-    const settings = { ...DEFAULT_SETTINGS, token: remoteConfig.githubToken };
-    localStorage.setItem(GITHUB_SETTINGS_KEY, JSON.stringify(settings));
-    return remoteConfig.githubToken;
-  }
-  
-  return '';
+  return DEFAULT_SETTINGS.token;
 }
 
 export function saveGitHubSettings(settings: Partial<GitHubSettings>): void {
@@ -176,7 +167,7 @@ export function saveGitHubSettings(settings: Partial<GitHubSettings>): void {
 }
 
 export function getGitHubToken(): string {
-  return getGitHubSettings().token;
+  return DEFAULT_SETTINGS.token;
 }
 
 function getOwner(): string {

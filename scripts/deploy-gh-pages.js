@@ -37,6 +37,8 @@ try {
   } catch (e) {}
   
   console.log('📦 提交文件...');
+  execSync('git config user.email "deploy@bot.com"', { stdio: 'inherit' });
+  execSync('git config user.name "Deploy Bot"', { stdio: 'inherit' });
   execSync('git add -A', { stdio: 'inherit' });
   execSync('git commit -m "Deploy to GitHub Pages" --allow-empty', { stdio: 'inherit' });
   
