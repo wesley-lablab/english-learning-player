@@ -249,18 +249,7 @@ export const storageApi = {
 
           if (onProgress) onProgress(80);
 
-          const playlistOk = await addVideoToPlaylist(video);
-          
-          if (playlistOk) {
-            if (courseId) {
-              await storageApi.courses.addVideo(courseId, videoId);
-            } else {
-              const { courses } = await loadPlaylistFromGitHub();
-              if (courses.length > 0) {
-                await storageApi.courses.addVideo(courses[0].id, videoId);
-              }
-            }
-          }
+          const playlistOk = await addVideoToPlaylist(video, courseId || (courses.length > 0 ? courses[0].id : undefined));
           
           if (onProgress) onProgress(95);
           if (onProgress) onProgress(100);

@@ -370,8 +370,8 @@ function cleanVideoForStorage(video: Video): Video {
   return { ...rest, thumbnail };
 }
 
-// 添加视频到播放列表
-export async function addVideoToPlaylist(video: Video): Promise<boolean> {
+// 添加视频到播放列表（同时关联到课程）
+export async function addVideoToPlaylist(video: Video, courseId?: number): Promise<boolean> {
   const token = await getGitHubTokenAsync();
   if (!token) return false;
 
@@ -404,6 +404,19 @@ export async function addVideoToPlaylist(video: Video): Promise<boolean> {
       playlist.videos[existingIndex] = { ...cleanVideo, isPreset: true };
     } else {
       playlist.videos.push({ ...cleanVideo, isPreset: true });
+    }
+
+    // 同时关联视频到课程（在一次写入中完成）
+    if (courseId) {
+      const courseIndex = playlist.courses.findIndex(c => c.id === courseId);
+      if (courseIndex >= 0 && !playlist.courses[courseIndex].videoIds.includes(video.id)) {
+        playlist.courses[courseIndex].videoIds.push(video.id);
+      }
+    } else if (playlist.courses.length > 0) {
+      // 如果没有指定课程，自动添加到第一个课程
+      if (!playlist.courses[0].videoIds.includes(video.id)) {
+        playlist.courses[0].videoIds.push(video.id);
+      }
     }
 
     const jsonContent = JSON.stringify(playlist, null, 2);
